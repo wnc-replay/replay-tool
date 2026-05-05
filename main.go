@@ -310,13 +310,16 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			})
 		}
 
-		// Drone lifecycle events — map Seq → BinOffset via PositionUpdates, then interpolate
+		// Build seq-number → BinOffset map (Seq is a stream sequence number, NOT an array index).
 		posLen := len(reader.PositionUpdates)
+		seqToBinOff := make(map[int]int64, posLen)
+		for _, pu := range reader.PositionUpdates {
+			seqToBinOff[pu.Seq] = int64(pu.BinOffset)
+		}
+
+		// Drone lifecycle events — map Seq (stream number) → BinOffset → elapsed time
 		for _, de := range reader.DroneEvents {
-			binOff := int64(0)
-			if de.Seq >= 0 && de.Seq < posLen {
-				binOff = int64(reader.PositionUpdates[de.Seq].BinOffset)
-			}
+			binOff := seqToBinOff[de.Seq] // 0 if not found (safe default)
 			output.Analysis.DroneEvents = append(output.Analysis.DroneEvents, analysis.DroneEventEntry{
 				PlayerRef: de.PlayerRef,
 				DroneRef:  de.DroneRef,
@@ -338,23 +341,32 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			})
 		}
 
-		// PlayerTrack.KilledAt — fill from DeathTimings using Seq→BinOffset→elapsed
-		seqToOffset := make(map[int]int64, posLen)
-		for _, pu := range reader.PositionUpdates {
-			seqToOffset[pu.Seq] = int64(pu.BinOffset)
-		}
+		// PlayerTrack.KilledAt — use the last frame's TimeSecs (reliable after timing fix).
+		// In Y11S1+, position BinOffsets are in a different byte range than timer ticks, so
+		// seq→BinOffset→tickElapsed returns 0. The last frame time is a better approximation.
+		killedPlayers := make(map[int]bool, len(reader.DeathTimings))
 		for _, dt := range reader.DeathTimings {
-			for i := range output.Analysis.Players {
-				if output.Analysis.Players[i].PlayerIndex == dt.PlayerIndex {
-					if binOff, ok := seqToOffset[dt.LastMovementSeq]; ok {
-						output.Analysis.Players[i].KilledAt = float32(tickElapsed(binOff))
-					}
+			killedPlayers[dt.PlayerIndex] = true
+		}
+		for i := range output.Analysis.Players {
+			pt := &output.Analysis.Players[i]
+			if !killedPlayers[pt.PlayerIndex] {
+				continue
+			}
+			// Scan backward for last non-camera frame with a valid time.
+			// Camera frames appended during extraction may have unreliable offsets.
+			for j := len(pt.Frames) - 1; j >= 0; j-- {
+				f := pt.Frames[j]
+				if !f.IsCamera && f.TimeSecs > 0 {
+					pt.KilledAt = f.TimeSecs
 					break
 				}
 			}
 		}
 
-		// Camera frames from the dissect library (spectator/POV look directions)
+		// Camera frames from the dissect library (spectator/POV look directions).
+		// Camera frame BinOffsets may be in a different byte range than timer ticks;
+		// use tickElapsed which returns 0 for out-of-range offsets (harmless for visualization).
 		for _, cf := range reader.CameraFrames {
 			output.Analysis.CameraFrames = append(output.Analysis.CameraFrames, analysis.LibraryCameraFrame{
 				PlayerIndex: cf.PlayerIndex,
@@ -369,11 +381,15 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			})
 		}
 
-		// Library shot events (reconstructed from ammo decrements)
+		// Library shot events — TimeInSeconds is a COUNTDOWN (seconds remaining).
+		// Convert to elapsed time: elapsed = roundDuration - countdown.
+		// The Seq→BinOffset path fails in Y11S1+ where shot Seq values exceed the
+		// position-update Seq range; TimeInSeconds is always populated correctly.
+		shotRoundDur := float64(output.Analysis.RoundDuration)
 		for _, se := range reader.ShotEvents {
-			binOff := int64(0)
-			if se.Seq >= 0 && se.Seq < posLen {
-				binOff = int64(reader.PositionUpdates[se.Seq].BinOffset)
+			elapsed := shotRoundDur - se.TimeInSeconds
+			if elapsed < 0 {
+				elapsed = 0
 			}
 			output.Analysis.LibraryShots = append(output.Analysis.LibraryShots, analysis.LibraryShotEntry{
 				PlayerIndex: se.PlayerIndex,
@@ -386,7 +402,7 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 				HeadQY:      se.HeadQY,
 				HeadQZ:      se.HeadQZ,
 				HeadQW:      se.HeadQW,
-				TimeSecs:    tickElapsed(binOff),
+				TimeSecs:    elapsed,
 				Seq:         se.Seq,
 			})
 		}
@@ -409,6 +425,64 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 				TimeSecs:  float32(tickElapsed(int64(ga.BinOffset))),
 				BinOffset: ga.BinOffset,
 			})
+		}
+
+		// Library health updates — supplement the binary scanner's results.
+		// The library's scanner finds hp=0 events (deaths/DBNOs) with correct player attribution.
+		// Their BinOffset is in the 56-61 MB region (between position stream and timer stream).
+		// Assign timing via min-max over the combined health update offset range.
+		if len(reader.HealthUpdates) > 0 {
+			for _, hu := range reader.HealthUpdates {
+				output.Analysis.HealthUpdates = append(output.Analysis.HealthUpdates, analysis.HealthUpdate{
+					PlayerIndex: hu.PlayerIndex,
+					Health:      hu.Health,
+					BinOffset:   hu.BinOffset,
+				})
+			}
+			// Re-apply min-max timing over all health updates (binary scanner + library).
+			if len(output.Analysis.HealthUpdates) > 0 {
+				minOff, maxOff := int64(output.Analysis.HealthUpdates[0].BinOffset), int64(output.Analysis.HealthUpdates[0].BinOffset)
+				for _, hu := range output.Analysis.HealthUpdates {
+					o := int64(hu.BinOffset)
+					if o < minOff {
+						minOff = o
+					}
+					if o > maxOff {
+						maxOff = o
+					}
+				}
+				if maxOff > minOff {
+					for i := range output.Analysis.HealthUpdates {
+						frac := float64(int64(output.Analysis.HealthUpdates[i].BinOffset)-minOff) / float64(maxOff-minOff)
+						output.Analysis.HealthUpdates[i].TimeSecs = float32(frac * float64(output.Analysis.RoundDuration))
+					}
+				}
+			}
+		}
+
+		// Entity classification from library TrackedEntities.
+		// The binary SPAWN counter scanner uses different byte offsets than the library,
+		// causing ref mismatches. Prefer the library's already-classified entity types.
+		if len(reader.TrackedEntities) > 0 {
+			trackedMap := make(map[uint32]dissect.TrackedEntity, len(reader.TrackedEntities))
+			for _, te := range reader.TrackedEntities {
+				trackedMap[te.EntityRef] = te
+			}
+			for i := range output.Analysis.Entities {
+				te, ok := trackedMap[output.Analysis.Entities[i].EntityID]
+				if !ok {
+					continue
+				}
+				if te.Type != "" && te.Type != dissect.EntityUnknown {
+					output.Analysis.Entities[i].Type = string(te.Type)
+				}
+				if te.GadgetName != "" {
+					output.Analysis.Entities[i].GadgetType = te.GadgetName
+				}
+				if te.BarricadeType != "" {
+					output.Analysis.Entities[i].BarricadeType = te.BarricadeType
+				}
+			}
 		}
 	}
 

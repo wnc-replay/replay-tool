@@ -60,9 +60,13 @@ type RoundAnalysis struct {
 type PosFrame struct {
 	Offset   int64   `json:"offset"`
 	EntityID uint32  `json:"entityId"`
-	X, Y, Z  float32 `json:"x,y,z"`
-	Qx, Qy   float32 `json:"qx,qy"`
-	Qz, Qw   float32 `json:"qz,qw"`
+	X        float32 `json:"x"`
+	Y        float32 `json:"y"`
+	Z        float32 `json:"z"`
+	Qx       float32 `json:"qx"`
+	Qy       float32 `json:"qy"`
+	Qz       float32 `json:"qz"`
+	Qw       float32 `json:"qw"`
 	YawDeg   float32 `json:"yawDeg"`
 	PitchDeg float32 `json:"pitchDeg"`
 	TimeSecs float32 `json:"timeSecs,omitempty"`
@@ -190,7 +194,9 @@ type PlayerLoadout struct {
 // ShotEvent is a single shot fired, with position and aim direction.
 type ShotEvent struct {
 	PlayerIndex int     `json:"playerIndex"`
-	X, Y, Z     float32 `json:"x,y,z"`
+	X           float32 `json:"x"`
+	Y           float32 `json:"y"`
+	Z           float32 `json:"z"`
 	YawDeg      float32 `json:"yawDeg"`
 	PitchDeg    float32 `json:"pitchDeg"`
 	HeadQX      float32 `json:"hqX,omitempty"`

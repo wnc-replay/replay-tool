@@ -560,7 +560,8 @@ func ExtractReviveEvents(healthUpdates []HealthUpdate) []ReviveEvent {
 
 // ExtractEquipmentSwitches detects weapon switches by tracking which weapon entity
 // has the most recent ammo event per player. A switch is emitted whenever the active
-// weapon EID changes for a player.
+// weapon EID changes for a player after the first 2 seconds (to skip round-start
+// initialization events where weapons are recorded in an arbitrary order).
 func ExtractEquipmentSwitches(ammoEvents []AmmoEvent, weapons map[int]*PlayerWeapons, ticks []TimerTick, totalDuration float32) []EquipmentSwitchEvent {
 	if len(ammoEvents) == 0 || len(weapons) == 0 {
 		return nil
@@ -583,26 +584,48 @@ func ExtractEquipmentSwitches(ammoEvents []AmmoEvent, weapons map[int]*PlayerWea
 		return sorted[i].Offset < sorted[j].Offset
 	})
 
+	// First pass: seed lastWeapon using all events (including t≤2s init events)
+	// so we have a valid "previous weapon" when real switches occur.
 	lastWeapon := make(map[int]uint32)
+	for _, ev := range sorted {
+		pIdx, ok := eidToPlayer[ev.WeaponEID]
+		if !ok {
+			continue
+		}
+		if _, seen := lastWeapon[pIdx]; !seen {
+			lastWeapon[pIdx] = ev.WeaponEID
+		}
+	}
+
+	// Second pass: emit switches only for events after the initialization window.
+	// ev.TimeSecs is already assigned by AssignAmmoTimes (min-max linear interpolation).
 	var events []EquipmentSwitchEvent
+	activeWeapon := make(map[int]uint32)
+	for pIdx, eid := range lastWeapon {
+		activeWeapon[pIdx] = eid
+	}
 
 	for _, ev := range sorted {
 		pIdx, ok := eidToPlayer[ev.WeaponEID]
 		if !ok {
 			continue
 		}
-		prev, hasPrev := lastWeapon[pIdx]
-		lastWeapon[pIdx] = ev.WeaponEID
-		if !hasPrev || prev == ev.WeaponEID {
+		// Skip round-start initialization window
+		if ev.TimeSecs <= 2 {
+			activeWeapon[pIdx] = ev.WeaponEID
 			continue
 		}
-		t := float32(tickOffsetToElapsed(ev.Offset, ticks, totalDuration))
+		prev := activeWeapon[pIdx]
+		activeWeapon[pIdx] = ev.WeaponEID
+		if prev == ev.WeaponEID || prev == 0 {
+			continue
+		}
 		events = append(events, EquipmentSwitchEvent{
 			PlayerIndex:  pIdx,
 			FromWeaponID: prev,
 			ToWeaponID:   ev.WeaponEID,
 			IsPrimaryNow: isPrimary[ev.WeaponEID],
-			TimeSecs:     t,
+			TimeSecs:     ev.TimeSecs,
 			BinOffset:    ev.Offset,
 		})
 	}

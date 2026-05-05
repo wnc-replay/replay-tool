@@ -30,14 +30,11 @@ func AnalyzeRoundWithMapping(data []byte, players []PlayerInfo, entityToPlayer m
 	// Step 2: Extract all entity positions (SPAWN + FC-UPDATE)
 	allTracks := ExtractEntityPositions(data)
 
-	// Step 3: Assign timestamps to frames
-	AssignFrameTimes(allTracks, result.TimerTicks, result.RoundDuration)
-
-	// Step 4: Extract bone data (head + chest aim quaternions)
+	// Step 3: Extract bone data (head + chest aim quaternions)
 	ExtractBoneData(data, allTracks)
 	ComputeHeadWorldAim(allTracks)
 
-	// Step 5: Map entities to players
+	// Step 4: Map entities to players
 	if entityToPlayer == nil || len(entityToPlayer) == 0 {
 		// Try binary SPAWN counter=494 pattern method
 		entityToPlayer = MapEntitiesToPlayers(data, len(players))
@@ -51,8 +48,11 @@ func AnalyzeRoundWithMapping(data []byte, players []PlayerInfo, entityToPlayer m
 		}
 	}
 
-	// Step 6: Camera frames (Pass 4 — per-entity detection)
+	// Step 5: Camera frames (Pass 4 — per-entity detection)
 	ExtractCameraFrames(data, allTracks)
+
+	// Step 6: Assign timestamps to frames (after camera frames are appended)
+	AssignFrameTimes(allTracks, result.TimerTicks, result.RoundDuration)
 
 	// Step 7: Infer stance from Z-height
 	InferStance(allTracks)
@@ -123,17 +123,17 @@ func AnalyzeRoundWithLibraryPositions(data []byte, players []PlayerInfo, positio
 	// Step 2: Build tracks from library positions (NOT binary extraction)
 	allTracks := BuildTracksFromLibraryPositions(positions)
 
-	// Step 3: Assign timestamps to frames
-	AssignFrameTimes(allTracks, result.TimerTicks, result.RoundDuration)
-
-	// Step 4: Extract bone data (head + chest aim quaternions) - still from binary
+	// Step 3: Extract bone data (head + chest aim quaternions) - still from binary
 	ExtractBoneData(data, allTracks)
 	ComputeHeadWorldAim(allTracks)
 
-	// Step 5: Entity-to-player mapping is already provided
+	// Step 4: Entity-to-player mapping is already provided
 
-	// Step 6: Camera frames (Pass 4 — per-entity detection)
+	// Step 5: Camera frames (Pass 4 — per-entity detection)
 	ExtractCameraFrames(data, allTracks)
+
+	// Step 6: Assign timestamps to frames (after camera frames are appended)
+	AssignFrameTimes(allTracks, result.TimerTicks, result.RoundDuration)
 
 	// Step 7: Infer stance from Z-height
 	InferStance(allTracks)

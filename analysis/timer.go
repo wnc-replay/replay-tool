@@ -108,11 +108,18 @@ func AssignFrameTimes(tracks []*internalTrack, ticks []TimerTick, totalDuration 
 		return
 	}
 
-	// Find min/max offsets across all frames
+	// Find min/max offsets across all non-camera frames.
+	// Camera frames appended by ExtractCameraFrames use raw binary scan offsets
+	// that can extend into the 62 MB timer region and would contaminate the range.
 	minOff := int64(math.MaxInt64)
 	maxOff := int64(0)
+	totalFrames := int64(0)
 	for _, tr := range tracks {
 		for _, f := range tr.Frames {
+			if f.IsCamera {
+				continue
+			}
+			totalFrames++
 			if f.Offset < minOff {
 				minOff = f.Offset
 			}
@@ -129,11 +136,17 @@ func AssignFrameTimes(tracks []*internalTrack, ticks []TimerTick, totalDuration 
 	// If we have timer ticks and offsets look like real binary offsets (not
 	// sequential 0..N indices), use the tick-anchored elapsed map for accuracy.
 	// Threshold: max offset > 10× frame count means they are binary positions.
-	totalFrames := int64(0)
-	for _, tr := range tracks {
-		totalFrames += int64(len(tr.Frames))
+	// Additionally require that at least one real tick falls within the frame offset
+	// range — in Y11S1+, the position stream (0–55 MB) and timer stream (61.9 MB+)
+	// are in separate byte regions, so tick-based mapping returns 0 for all frames.
+	inTimerRange := false
+	for _, t := range ticks {
+		if t.Offset > 1000 && t.Seconds > 0 && t.Offset <= maxOff {
+			inTimerRange = true
+			break
+		}
 	}
-	useTicks := len(ticks) >= 2 && maxOff > totalFrames*10
+	useTicks := len(ticks) >= 2 && maxOff > totalFrames*10 && inTimerRange
 
 	if useTicks {
 		elapsed := buildTickElapsedMap(ticks, totalDuration)
@@ -228,13 +241,42 @@ func buildTickElapsedMap(ticks []TimerTick, totalDuration float32) func(int64) f
 }
 
 // AssignHealthTimes assigns elapsed time to health updates using tick-based interpolation.
+// Falls back to min-max linear over the health update offsets when tick-based gives 0
+// for all events (e.g. in Y11S1+ where health updates occupy a byte region between the
+// position stream and the timer-tick stream).
 func AssignHealthTimes(updates []HealthUpdate, ticks []TimerTick, totalDuration float32) {
 	if len(updates) == 0 || totalDuration <= 0 {
 		return
 	}
 	elapsed := buildTickElapsedMap(ticks, totalDuration)
+	anyNonZero := false
 	for i := range updates {
-		updates[i].TimeSecs = float32(elapsed(int64(updates[i].BinOffset)))
+		t := float32(elapsed(int64(updates[i].BinOffset)))
+		updates[i].TimeSecs = t
+		if t > 0 {
+			anyNonZero = true
+		}
+	}
+	if anyNonZero {
+		return
+	}
+	// Fallback: linear interpolation over the offset range of the updates themselves.
+	minOff, maxOff := int64(math.MaxInt64), int64(0)
+	for _, u := range updates {
+		o := int64(u.BinOffset)
+		if o < minOff {
+			minOff = o
+		}
+		if o > maxOff {
+			maxOff = o
+		}
+	}
+	if maxOff <= minOff {
+		return
+	}
+	for i := range updates {
+		frac := float64(int64(updates[i].BinOffset)-minOff) / float64(maxOff-minOff)
+		updates[i].TimeSecs = float32(frac * float64(totalDuration))
 	}
 }
 

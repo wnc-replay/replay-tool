@@ -2033,25 +2033,60 @@ func (r *Reader) buildShotEvents(entityToPlayer map[uint32]int) {
 				continue
 			}
 
-			// Binary search by binary offset for nearest position
+			// Match ammo update to the nearest player position.
+			// Primary: binary search by binary offset (works when ammo and position
+			// data are in the same byte region, e.g. pre-Y11S1).
+			// Fallback: when all position offsets are smaller than the ammo offset
+			// (Y11S1+: position stream 0-55 MB, ammo stream 61.9 MB+), use the
+			// ammo event's TimeInSeconds mapped proportionally to the position array.
 			targetOffset := au.BinOffset
-			lo, hi := 0, len(positions)-1
-			for lo <= hi {
-				mid := (lo + hi) / 2
-				if positions[mid].binOffset < targetOffset {
-					lo = mid + 1
-				} else {
-					hi = mid - 1
-				}
-			}
+			maxPosOffset := positions[len(positions)-1].binOffset
 			bestIdx := 0
-			bestDist := abs(positions[0].binOffset - targetOffset)
-			for _, idx := range []int{lo - 1, lo, lo + 1} {
-				if idx >= 0 && idx < len(positions) {
-					d := abs(positions[idx].binOffset - targetOffset)
-					if d < bestDist {
-						bestDist = d
-						bestIdx = idx
+
+			if targetOffset > maxPosOffset {
+				// au.TimeInSeconds is a COUNTDOWN (seconds remaining), not elapsed.
+				// Find the maximum countdown across all ammo updates (≈ round start).
+				maxT := 0.0
+				for _, a2 := range r.AmmoUpdates {
+					if a2.TimeInSeconds > maxT {
+						maxT = a2.TimeInSeconds
+					}
+				}
+				if maxT <= 0 {
+					maxT = 150
+				}
+				// Convert countdown to elapsed fraction: elapsed = 1 - countdown/maxCountdown
+				elapsed := 1.0 - au.TimeInSeconds/maxT
+				if elapsed < 0 {
+					elapsed = 0
+				} else if elapsed > 1 {
+					elapsed = 1
+				}
+				idx := int(elapsed * float64(len(positions)-1))
+				if idx < 0 {
+					idx = 0
+				} else if idx >= len(positions) {
+					idx = len(positions) - 1
+				}
+				bestIdx = idx
+			} else {
+				lo, hi := 0, len(positions)-1
+				for lo <= hi {
+					mid := (lo + hi) / 2
+					if positions[mid].binOffset < targetOffset {
+						lo = mid + 1
+					} else {
+						hi = mid - 1
+					}
+				}
+				bestDist := abs(positions[0].binOffset - targetOffset)
+				for _, idx := range []int{lo - 1, lo, lo + 1} {
+					if idx >= 0 && idx < len(positions) {
+						d := abs(positions[idx].binOffset - targetOffset)
+						if d < bestDist {
+							bestDist = d
+							bestIdx = idx
+						}
 					}
 				}
 			}

@@ -548,6 +548,27 @@ func sortTracksByFrameCount(tracks []*internalTrack) {
 func BuildTracksFromLibraryPositions(positions []LibraryPosition) []*internalTrack {
 	trackMap := make(map[uint32]*internalTrack)
 
+	// First pass: find the real (non-zero) BinOffset range so that frames
+	// without a binary offset can be scaled into the same range using their
+	// chronological position in the stream (sequential index i).
+	var minReal, maxReal int64 = math.MaxInt64, 0
+	for _, pos := range positions {
+		if pos.BinOffset > 0 {
+			o := int64(pos.BinOffset)
+			if o < minReal {
+				minReal = o
+			}
+			if o > maxReal {
+				maxReal = o
+			}
+		}
+	}
+	hasRealOffsets := maxReal > 0
+	total := int64(len(positions))
+	if total == 0 {
+		total = 1
+	}
+
 	for i, pos := range positions {
 		tr, exists := trackMap[pos.EntityRef]
 		if !exists {
@@ -559,10 +580,17 @@ func BuildTracksFromLibraryPositions(positions []LibraryPosition) []*internalTra
 			trackMap[pos.EntityRef] = tr
 		}
 
-		offset := int64(pos.BinOffset)
-		if offset == 0 {
-			offset = int64(i) // fallback to sequential index if no binary offset
+		var offset int64
+		if pos.BinOffset > 0 {
+			offset = int64(pos.BinOffset)
+		} else if hasRealOffsets {
+			// Scale sequential index into the real offset space so that
+			// min-max interpolation works correctly across mixed-offset tracks.
+			offset = minReal + int64(i)*(maxReal-minReal)/total
+		} else {
+			offset = int64(i + 1)
 		}
+
 		frame := PosFrame{
 			Offset:   offset,
 			EntityID: pos.EntityRef,
