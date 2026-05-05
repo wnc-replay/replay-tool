@@ -3,6 +3,7 @@ package analysis
 import (
 	"bytes"
 	"encoding/binary"
+	"sort"
 )
 
 // ExtractBinaryFeedback parses kill/death/DBNO events directly from the binary.
@@ -475,6 +476,181 @@ func ExtractLoadouts(data []byte, players []PlayerInfo) []PlayerLoadout {
 	}
 
 	return loadouts
+}
+
+// ExtractDestructionEventsFromHealth derives entity destruction events from health updates.
+// An entity is "destroyed" when its health transitions from positive to zero.
+func ExtractDestructionEventsFromHealth(allHealth []HealthUpdate, entities []EntityTrack) []DestructionEvent {
+	// Build entity ref → EntityTrack lookup
+	entityMap := make(map[uint32]*EntityTrack, len(entities))
+	for i := range entities {
+		entityMap[entities[i].EntityID] = &entities[i]
+	}
+
+	// Collect non-player health updates grouped by entity ref
+	entityHealthMap := make(map[uint32][]HealthUpdate)
+	for _, h := range allHealth {
+		if h.PlayerIndex >= 0 || h.EntityRef == 0 {
+			continue
+		}
+		entityHealthMap[h.EntityRef] = append(entityHealthMap[h.EntityRef], h)
+	}
+
+	var events []DestructionEvent
+	for entityRef, updates := range entityHealthMap {
+		sort.Slice(updates, func(i, j int) bool {
+			return updates[i].BinOffset < updates[j].BinOffset
+		})
+		prevHP := float32(-1)
+		for _, u := range updates {
+			if prevHP > 0 && u.Health == 0 {
+				entityType := "unknown"
+				gadgetType := ""
+				entityHex := ""
+				if et, ok := entityMap[entityRef]; ok {
+					entityType = et.Type
+					gadgetType = et.GadgetType
+					entityHex = et.EntityHex
+				}
+				events = append(events, DestructionEvent{
+					EntityID:   entityRef,
+					EntityHex:  entityHex,
+					EntityType: entityType,
+					GadgetType: gadgetType,
+					TimeSecs:   u.TimeSecs,
+					BinOffset:  int64(u.BinOffset),
+				})
+				break
+			}
+			prevHP = u.Health
+		}
+	}
+	return events
+}
+
+// ExtractReviveEvents detects when a downed player is revived by scanning health updates
+// for HP transitions from near-zero (≤5) back to a meaningful value (≥15).
+func ExtractReviveEvents(healthUpdates []HealthUpdate) []ReviveEvent {
+	// Group by player, sort by offset
+	byPlayer := make(map[int][]HealthUpdate)
+	for _, h := range healthUpdates {
+		if h.PlayerIndex >= 0 {
+			byPlayer[h.PlayerIndex] = append(byPlayer[h.PlayerIndex], h)
+		}
+	}
+	var events []ReviveEvent
+	for pIdx, updates := range byPlayer {
+		sort.Slice(updates, func(i, j int) bool {
+			return updates[i].BinOffset < updates[j].BinOffset
+		})
+		prevHP := float32(-1)
+		for _, u := range updates {
+			if prevHP >= 0 && prevHP <= 5 && u.Health >= 15 {
+				events = append(events, ReviveEvent{
+					PlayerIndex: pIdx,
+					TimeSecs:    u.TimeSecs,
+					BinOffset:   u.BinOffset,
+				})
+			}
+			prevHP = u.Health
+		}
+	}
+	return events
+}
+
+// ExtractEquipmentSwitches detects weapon switches by tracking which weapon entity
+// has the most recent ammo event per player. A switch is emitted whenever the active
+// weapon EID changes for a player.
+func ExtractEquipmentSwitches(ammoEvents []AmmoEvent, weapons map[int]*PlayerWeapons, ticks []TimerTick, totalDuration float32) []EquipmentSwitchEvent {
+	if len(ammoEvents) == 0 || len(weapons) == 0 {
+		return nil
+	}
+
+	// Build weapon EID → player index and whether it is primary
+	eidToPlayer := make(map[uint32]int)
+	isPrimary := make(map[uint32]bool)
+	for pIdx, pw := range weapons {
+		for _, w := range pw.AllWeapons {
+			eidToPlayer[w.WeaponEID] = pIdx
+			isPrimary[w.WeaponEID] = w.IsPrimary
+		}
+	}
+
+	// Sort events by binary offset
+	sorted := make([]AmmoEvent, len(ammoEvents))
+	copy(sorted, ammoEvents)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Offset < sorted[j].Offset
+	})
+
+	lastWeapon := make(map[int]uint32)
+	var events []EquipmentSwitchEvent
+
+	for _, ev := range sorted {
+		pIdx, ok := eidToPlayer[ev.WeaponEID]
+		if !ok {
+			continue
+		}
+		prev, hasPrev := lastWeapon[pIdx]
+		lastWeapon[pIdx] = ev.WeaponEID
+		if !hasPrev || prev == ev.WeaponEID {
+			continue
+		}
+		t := float32(tickOffsetToElapsed(ev.Offset, ticks, totalDuration))
+		events = append(events, EquipmentSwitchEvent{
+			PlayerIndex:  pIdx,
+			FromWeaponID: prev,
+			ToWeaponID:   ev.WeaponEID,
+			IsPrimaryNow: isPrimary[ev.WeaponEID],
+			TimeSecs:     t,
+			BinOffset:    ev.Offset,
+		})
+	}
+	return events
+}
+
+// BuildGameEvents assembles a sorted unified event timeline suitable for replay visualization.
+func BuildGameEvents(feedback []BinaryMatchEvent, phases []TimerPhase, duration float32) []GameEvent {
+	var events []GameEvent
+
+	for _, f := range feedback {
+		var text string
+		switch f.Type {
+		case "kill":
+			if f.Attacker != "" {
+				text = f.Attacker + " killed " + f.Target
+			} else {
+				text = f.Target + " died"
+			}
+		case "death":
+			text = f.Target + " died"
+		case "dbno":
+			if f.Attacker != "" {
+				text = f.Attacker + " downed " + f.Target
+			} else {
+				text = f.Target + " downed"
+			}
+		}
+		events = append(events, GameEvent{
+			Type:     f.Type,
+			TimeSecs: float32(f.TimeSecs),
+			Text:     text,
+			Headshot: f.Headshot,
+		})
+	}
+
+	if duration > 0 {
+		events = append(events, GameEvent{
+			Type:     "round_end",
+			TimeSecs: duration,
+			Text:     "Round ended",
+		})
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].TimeSecs < events[j].TimeSecs
+	})
+	return events
 }
 
 // ExtractOperatorSwaps scans for mid-round attacker operator swap events.

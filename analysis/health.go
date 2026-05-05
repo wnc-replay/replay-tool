@@ -52,6 +52,7 @@ func ExtractHealthUpdates(data []byte, entityToPlayer map[uint32]int, ticks []Ti
 		updates = append(updates, HealthUpdate{
 			PlayerIndex: pIdx,
 			Health:      hp,
+			EntityRef:   entityRef,
 			BinOffset:   i,
 		})
 	}

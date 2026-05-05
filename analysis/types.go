@@ -40,6 +40,12 @@ type RoundAnalysis struct {
 	DroneEvents []DroneEventEntry `json:"droneEvents,omitempty"`
 	// Last significant movement positions for players who died
 	DeathTimings []DeathTimingEntry `json:"deathTimings,omitempty"`
+	// Destruction events (drone/gadget/barricade HP reached zero)
+	DestructionEvents []DestructionEvent `json:"destructionEvents,omitempty"`
+	// Revive events (downed player brought back)
+	ReviveEvents []ReviveEvent `json:"reviveEvents,omitempty"`
+	// Equipment switch events (player changed active weapon)
+	EquipmentSwitches []EquipmentSwitchEvent `json:"equipmentSwitches,omitempty"`
 	// Timed game events for visualization
 	GameEvents []GameEvent `json:"gameEvents,omitempty"`
 	// Recording player index
@@ -197,10 +203,11 @@ type ShotEvent struct {
 
 // ---------- Health ----------
 
-// HealthUpdate is a health state change for a player.
+// HealthUpdate is a health state change for a player or entity.
 type HealthUpdate struct {
 	PlayerIndex int     `json:"playerIndex"`
 	Health      float32 `json:"health"`
+	EntityRef   uint32  `json:"entityRef,omitempty"` // non-zero for non-player entity health events
 	TimeSecs    float32 `json:"timeSecs,omitempty"`
 	BinOffset   int     `json:"binOffset"`
 }
@@ -340,6 +347,33 @@ type GameEvent struct {
 	TimeSecs float32 `json:"timeSecs"`
 	Text     string  `json:"text"`
 	Headshot bool    `json:"headshot,omitempty"`
+}
+
+// DestructionEvent is emitted when a non-player entity's health reaches zero.
+type DestructionEvent struct {
+	EntityID   uint32  `json:"entityId"`
+	EntityHex  string  `json:"entityHex,omitempty"`
+	EntityType string  `json:"entityType"` // "drone", "barricade", "gadget", "projectile", "unknown"
+	GadgetType string  `json:"gadgetType,omitempty"`
+	TimeSecs   float32 `json:"timeSecs,omitempty"`
+	BinOffset  int64   `json:"binOffset"`
+}
+
+// ReviveEvent is emitted when a downed player is revived (HP rises from near-zero).
+type ReviveEvent struct {
+	PlayerIndex int     `json:"playerIndex"`
+	TimeSecs    float32 `json:"timeSecs,omitempty"`
+	BinOffset   int     `json:"binOffset"`
+}
+
+// EquipmentSwitchEvent is emitted when a player changes their active weapon.
+type EquipmentSwitchEvent struct {
+	PlayerIndex  int     `json:"playerIndex"`
+	FromWeaponID uint32  `json:"fromWeaponId,omitempty"`
+	ToWeaponID   uint32  `json:"toWeaponId,omitempty"`
+	IsPrimaryNow bool    `json:"isPrimaryNow"`
+	TimeSecs     float32 `json:"timeSecs,omitempty"`
+	BinOffset    int64   `json:"binOffset"`
 }
 
 // LibraryPosition represents a position update from the dissect library.

@@ -71,6 +71,7 @@ func AnalyzeRoundWithMapping(data []byte, players []PlayerInfo, entityToPlayer m
 	ammoEvents := ExtractAmmoEvents(data)
 	AssignAmmoTimes(ammoEvents, result.TimerTicks, result.RoundDuration)
 	result.Weapons = BuildWeaponTracking(data, ammoEvents, players, entityToPlayer)
+	result.EquipmentSwitches = ExtractEquipmentSwitches(ammoEvents, result.Weapons, result.TimerTicks, result.RoundDuration)
 
 	// Step 12: Equipment loadouts (weapon/gadget names)
 	result.Loadouts = ExtractLoadouts(data, players)
@@ -86,6 +87,8 @@ func AnalyzeRoundWithMapping(data []byte, players []PlayerInfo, entityToPlayer m
 			result.HealthUpdates = append(result.HealthUpdates, h)
 		}
 	}
+	result.DestructionEvents = ExtractDestructionEventsFromHealth(allHealth, result.Entities)
+	result.ReviveEvents = ExtractReviveEvents(result.HealthUpdates)
 
 	// Step 15: Binary match feedback (kills/deaths/DBNOs)
 	result.BinaryFeedback = ExtractBinaryFeedback(data, result.TimerTicks, result.RoundDuration)
@@ -95,6 +98,9 @@ func AnalyzeRoundWithMapping(data []byte, players []PlayerInfo, entityToPlayer m
 
 	// Step 17: Operator swap events (binary fallback for pre-Y10S4 replays)
 	result.OperatorSwaps = ExtractOperatorSwaps(data, players, result.TimerTicks)
+
+	// Step 18: Unified game event timeline for visualization
+	result.GameEvents = BuildGameEvents(result.BinaryFeedback, result.TimerPhases, result.RoundDuration)
 
 	return result
 }
@@ -146,6 +152,7 @@ func AnalyzeRoundWithLibraryPositions(data []byte, players []PlayerInfo, positio
 	ammoEvents := ExtractAmmoEvents(data)
 	AssignAmmoTimes(ammoEvents, result.TimerTicks, result.RoundDuration)
 	result.Weapons = BuildWeaponTracking(data, ammoEvents, players, entityToPlayer)
+	result.EquipmentSwitches = ExtractEquipmentSwitches(ammoEvents, result.Weapons, result.TimerTicks, result.RoundDuration)
 
 	// Step 12: Equipment loadouts (weapon/gadget names)
 	result.Loadouts = ExtractLoadouts(data, players)
@@ -161,6 +168,8 @@ func AnalyzeRoundWithLibraryPositions(data []byte, players []PlayerInfo, positio
 			result.HealthUpdates = append(result.HealthUpdates, h)
 		}
 	}
+	result.DestructionEvents = ExtractDestructionEventsFromHealth(allHealth, result.Entities)
+	result.ReviveEvents = ExtractReviveEvents(result.HealthUpdates)
 
 	// Step 15: Binary match feedback (kills/deaths/DBNOs)
 	result.BinaryFeedback = ExtractBinaryFeedback(data, result.TimerTicks, result.RoundDuration)
@@ -170,6 +179,9 @@ func AnalyzeRoundWithLibraryPositions(data []byte, players []PlayerInfo, positio
 
 	// Step 17: Operator swap events (binary fallback for pre-Y10S4 replays)
 	result.OperatorSwaps = ExtractOperatorSwaps(data, players, result.TimerTicks)
+
+	// Step 18: Unified game event timeline for visualization
+	result.GameEvents = BuildGameEvents(result.BinaryFeedback, result.TimerPhases, result.RoundDuration)
 
 	return result
 }
