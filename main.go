@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -107,6 +108,16 @@ type HeaderInfo struct {
 	Teams         []TeamInfo         `json:"teams"`
 	Players       []PlayerInfoHeader `json:"players"`
 	MatchFeedback []FeedbackInfo     `json:"matchFeedback,omitempty"`
+	Scoreboard    []ScoreboardEntry  `json:"scoreboard,omitempty"`
+}
+
+// ScoreboardEntry is one row of the round-end scoreboard parsed by the dissect
+// library from the Score / Kills / Assists patterns.
+type ScoreboardEntry struct {
+	PlayerID         string `json:"playerId"` // 4-byte short ID, hex
+	Score            uint32 `json:"score"`
+	Assists          uint32 `json:"assists"`
+	AssistsFromRound uint32 `json:"assistsFromRound,omitempty"`
 }
 
 type TeamInfo struct {
@@ -200,6 +211,16 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			Time:     mf.Time,
 		}
 		header.MatchFeedback = append(header.MatchFeedback, fb)
+	}
+
+	// Final scoreboard (per-player score / assists totals at round end)
+	for _, sp := range reader.Scoreboard.Players {
+		header.Scoreboard = append(header.Scoreboard, ScoreboardEntry{
+			PlayerID:         hex.EncodeToString(sp.ID),
+			Score:            sp.Score,
+			Assists:          sp.Assists,
+			AssistsFromRound: sp.AssistsFromRound,
+		})
 	}
 
 	output := FullOutput{Header: header}
