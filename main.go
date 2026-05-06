@@ -94,8 +94,35 @@ func main() {
 
 // FullOutput combines header data with binary analysis.
 type FullOutput struct {
-	Header   HeaderInfo              `json:"header"`
-	Analysis *analysis.RoundAnalysis `json:"analysis,omitempty"`
+	Header          HeaderInfo              `json:"header"`
+	Analysis        *analysis.RoundAnalysis `json:"analysis,omitempty"`
+	LibraryLoadouts []LibraryLoadoutEntry   `json:"libraryLoadouts,omitempty"`
+}
+
+// LibraryLoadoutEntry mirrors dissect.PlayerLoadout for the JSON output.
+// Provides per-player primary/secondary weapon entity refs and gadget counts
+// that complement analysis.loadouts (which carries names but not EIDs/counts).
+type LibraryLoadoutEntry struct {
+	PlayerIndex    int                  `json:"playerIndex"`
+	Username       string               `json:"username"`
+	Primary        *LibraryWeaponInfo   `json:"primary,omitempty"`
+	Secondary      *LibraryWeaponInfo   `json:"secondary,omitempty"`
+	GadgetLoadout  *LibraryGadgetCounts `json:"gadgetLoadout,omitempty"`
+}
+
+type LibraryWeaponInfo struct {
+	EntityRef       uint32 `json:"entityRef"`
+	InitialCapacity uint32 `json:"initialCapacity"`
+	Hash1           uint32 `json:"hash1,omitempty"`
+	Hash2           uint32 `json:"hash2,omitempty"`
+	IsPrimary       bool   `json:"isPrimary"`
+}
+
+type LibraryGadgetCounts struct {
+	PrimaryCount   int  `json:"primaryCount"`
+	SecondaryCount int  `json:"secondaryCount"`
+	HasPrimary     bool `json:"hasPrimary"`
+	HasSecondary   bool `json:"hasSecondary"`
 }
 
 // HeaderInfo is the round header from the dissect library.
@@ -227,7 +254,44 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 		})
 	}
 
-	output := FullOutput{Header: header}
+	// Per-player loadouts as detected by the dissect library (weapon EID +
+	// gadget item counts) — complements analysis.loadouts which carries names.
+	var libLoadouts []LibraryLoadoutEntry
+	for _, l := range reader.Loadouts {
+		entry := LibraryLoadoutEntry{
+			PlayerIndex: l.PlayerIndex,
+			Username:    l.Username,
+		}
+		if l.Primary != nil {
+			entry.Primary = &LibraryWeaponInfo{
+				EntityRef:       l.Primary.EntityRef,
+				InitialCapacity: l.Primary.InitialCap,
+				Hash1:           l.Primary.Hash1,
+				Hash2:           l.Primary.Hash2,
+				IsPrimary:       l.Primary.IsPrimary,
+			}
+		}
+		if l.Secondary != nil {
+			entry.Secondary = &LibraryWeaponInfo{
+				EntityRef:       l.Secondary.EntityRef,
+				InitialCapacity: l.Secondary.InitialCap,
+				Hash1:           l.Secondary.Hash1,
+				Hash2:           l.Secondary.Hash2,
+				IsPrimary:       l.Secondary.IsPrimary,
+			}
+		}
+		if l.GadgetLoadout != nil {
+			entry.GadgetLoadout = &LibraryGadgetCounts{
+				PrimaryCount:   l.GadgetLoadout.PrimaryCount,
+				SecondaryCount: l.GadgetLoadout.SecondaryCount,
+				HasPrimary:     l.GadgetLoadout.HasPrimary,
+				HasSecondary:   l.GadgetLoadout.HasSecondary,
+			}
+		}
+		libLoadouts = append(libLoadouts, entry)
+	}
+
+	output := FullOutput{Header: header, LibraryLoadouts: libLoadouts}
 
 	if headerOnly {
 		return output
