@@ -260,6 +260,17 @@ type BinaryMatchEvent struct {
 	Target   string  `json:"target"`
 	Headshot bool    `json:"headshot"`
 	TimeSecs float64 `json:"timeSecs,omitempty"`
+
+	// Extended TLV properties co-occurring within the same kill block.
+	// These hashes are emitted for every kill record on Y11S1+ replays
+	// but were previously dropped during scanning.
+	WeaponEntRef64 uint64 `json:"weaponEntRef64,omitempty"` // hash 0x790009E3 (8-byte payload)
+	KillFlag1      uint8  `json:"killFlag1,omitempty"`      // hash 0x8F0292B5 (1-byte payload)
+	KillEnum1      uint32 `json:"killEnum1,omitempty"`      // hash 0x5BC4BC84 (4-byte payload)
+	KillEnum2      uint32 `json:"killEnum2,omitempty"`      // hash 0x37BF3E90 (4-byte payload)
+	KillEnum3      uint32 `json:"killEnum3,omitempty"`      // hash 0xD13DA88D (4-byte payload)
+	KillEnum4      uint32 `json:"killEnum4,omitempty"`      // hash 0x3187B853 (4-byte payload)
+	KillEnum5      uint32 `json:"killEnum5,omitempty"`      // hash 0x0B64ADA5 (4-byte payload)
 }
 
 // LibraryCameraFrame is a camera look-direction sample from the dissect library.
@@ -277,18 +288,18 @@ type LibraryCameraFrame struct {
 
 // LibraryShotEntry is a shot event reconstructed by the dissect library.
 type LibraryShotEntry struct {
-	PlayerIndex   int     `json:"playerIndex"`
-	X             float32 `json:"x"`
-	Y             float32 `json:"y"`
-	Z             float32 `json:"z"`
-	Yaw           float32 `json:"yaw"`
-	Pitch         float32 `json:"pitch"`
-	HeadQX        float32 `json:"hqX,omitempty"`
-	HeadQY        float32 `json:"hqY,omitempty"`
-	HeadQZ        float32 `json:"hqZ,omitempty"`
-	HeadQW        float32 `json:"hqW,omitempty"`
-	TimeSecs      float64 `json:"timeSecs"`
-	Seq           int     `json:"seq"`
+	PlayerIndex int     `json:"playerIndex"`
+	X           float32 `json:"x"`
+	Y           float32 `json:"y"`
+	Z           float32 `json:"z"`
+	Yaw         float32 `json:"yaw"`
+	Pitch       float32 `json:"pitch"`
+	HeadQX      float32 `json:"hqX,omitempty"`
+	HeadQY      float32 `json:"hqY,omitempty"`
+	HeadQZ      float32 `json:"hqZ,omitempty"`
+	HeadQW      float32 `json:"hqW,omitempty"`
+	TimeSecs    float64 `json:"timeSecs"`
+	Seq         int     `json:"seq"`
 }
 
 // LibraryAmmoUpdate is a raw ammo state update from the dissect library.

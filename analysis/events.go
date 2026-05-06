@@ -102,33 +102,103 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 		seen[key] = true
 
 		t := tickOffsetToElapsed(int64(i), ticks, totalDuration)
-		events = append(events, BinaryMatchEvent{
+		ev := BinaryMatchEvent{
 			Offset:   int64(i),
 			Type:     evType,
 			Attacker: attacker,
 			Target:   target,
 			Headshot: headshot,
 			TimeSecs: t,
-		})
+		}
+		fillExtendedKillTLVs(data, i, dbnoWindowBytes, &ev)
+		events = append(events, ev)
 
 		// Emit separate DBNO event
 		if isDBNO {
 			dbnoKey := eventKey{"dbno", attacker, target}
 			if !seen[dbnoKey] {
 				seen[dbnoKey] = true
-				events = append(events, BinaryMatchEvent{
+				dbnoEv := BinaryMatchEvent{
 					Offset:   int64(i),
 					Type:     "dbno",
 					Attacker: attacker,
 					Target:   target,
 					Headshot: headshot,
 					TimeSecs: t,
-				})
+				}
+				fillExtendedKillTLVs(data, i, dbnoWindowBytes, &dbnoEv)
+				events = append(events, dbnoEv)
 			}
 		}
 	}
 
 	return events
+}
+
+// Extended kill-block property hashes. Co-occur within ~256 bytes of the
+// kill signature on Y11S1+ replays. Hashes are LE u32 of the documented
+// pretty-printed value.
+const (
+	kHashWeaponEntRef64 = 0x790009E3
+	kHashKillFlag1      = 0x8F0292B5
+	kHashKillEnum1      = 0x5BC4BC84
+	kHashKillEnum2      = 0x37BF3E90
+	kHashKillEnum3      = 0xD13DA88D
+	kHashKillEnum4      = 0x3187B853
+	kHashKillEnum5      = 0x0B64ADA5
+)
+
+// fillExtendedKillTLVs scans a window centred on a kill signature for the
+// seven extended TLV property hashes that follow the documented kill record
+// and writes their values into ev. Each TLV is encoded as
+// [22|23][hash u32 LE][typeByte][value]. We tolerate either marker byte and
+// skip records whose payload size doesn't match the expected width.
+func fillExtendedKillTLVs(data []byte, killOff, window int, ev *BinaryMatchEvent) {
+	start := killOff - window
+	if start < 0 {
+		start = 0
+	}
+	end := killOff + window
+	if end+13 > len(data) {
+		end = len(data) - 13
+	}
+	for j := start; j+9 < end; j++ {
+		if data[j] != 0x22 && data[j] != 0x23 {
+			continue
+		}
+		h := binary.LittleEndian.Uint32(data[j+1 : j+5])
+		typeByte := data[j+5]
+		switch h {
+		case kHashWeaponEntRef64:
+			if typeByte == 0x08 && j+14 <= len(data) {
+				ev.WeaponEntRef64 = binary.LittleEndian.Uint64(data[j+6 : j+14])
+			}
+		case kHashKillFlag1:
+			if typeByte == 0x01 && j+7 <= len(data) {
+				ev.KillFlag1 = data[j+6]
+			}
+		case kHashKillEnum1:
+			if typeByte == 0x04 && j+10 <= len(data) {
+				ev.KillEnum1 = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashKillEnum2:
+			if typeByte == 0x04 && j+10 <= len(data) {
+				ev.KillEnum2 = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashKillEnum3:
+			if typeByte == 0x04 && j+10 <= len(data) {
+				ev.KillEnum3 = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashKillEnum4:
+			if typeByte == 0x04 && j+10 <= len(data) {
+				ev.KillEnum4 = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashKillEnum5:
+			if typeByte == 0x04 && j+10 <= len(data) {
+				ev.KillEnum5 = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		}
+	}
 }
 
 // tickOffsetToElapsed converts a binary offset to elapsed seconds by interpolating
