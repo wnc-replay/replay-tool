@@ -252,27 +252,27 @@ r6-replay-tool/
 ## TODO
 
 ### High Priority
-- [ ] **Fix player-entity mapping** — SPAWN counter=494 entity ref offset needs alignment; currently 0/10 players mapped
-- [ ] **Match time syncing** — rounds can end early on objective/all-dead; don't assume full timer duration
+- [x] **Fix player-entity mapping** — solved via `dissect.validateEntityMapBySpawn` (3D centroid swap detection) + position-based fallback
+- [x] **Match time syncing** — `RoundDurationFromTicks` and `tickElapsed` interpolation now drive every timed event
 - [ ] **Fix look angles** — better matching between camera rotation and movement rotation data
-- [ ] **Shoot/hit detection & bullet traces** — shot events exist but need weapon-to-player linking in the pipeline
-- [ ] **Remove the `replace` directive** — vendor or publish the r6-dissect fork for standalone builds
+- [x] **Shoot/hit detection & bullet traces** — `analysis.ReconstructShots` plus library `ShotEvents` (with `PlayerIndex`) cover this
+- [x] **Remove the `replace` directive** — `dissect/` is vendored in-tree
 
 ### Medium Priority
 - [ ] **Hostage/bomb/container detection** — identify objective entities in the binary
-- [ ] **Attacker operator swap** — parse `22 A9 26 0B E4` for mid-round operator changes
-- [ ] **Improve health mapping** — use ref8 block + post-block entity marker for more accurate player assignment
-- [ ] **Score delta tracking** — detect +100 score changes to identify defuser planter/disabler
-- [ ] **Entity init block fallback** — use `61 73 85 FE` init order for player mapping when SPAWN approach fails
-- [ ] **Drone connect/disconnect state machine** — track full drone viewing lifecycle (not just 0x0880 flag)
-- [ ] **Game action timestamps** — use timer tick interpolation instead of raw offset fraction for reinforce/gadget deploy times
+- [x] **Attacker operator swap** — `readAtkOpSwap` listener on `22 A9 26 0B E4`
+- [x] **Improve health mapping** — `findPrecedingEntity` walks back 256 bytes to the F0-prefix ref
+- [x] **Score delta tracking** — Y10S4+ detects defuser planter/disabler from the +100 bonus
+- [x] **Entity init block fallback** — `MapPlayersFromInitBlocks` uses `61 73 85 FE` order
+- [x] **Drone connect/disconnect state machine** — `playerDroneState` + `droneViewMarkers` produce confirmed `DroneEvents`
+- [x] **Game action timestamps** — reinforce / gadget deploy now use tick-interpolated time
 
 ### Low Priority
 - [ ] **Rappel detection** — identify rappel state from movement packets
 - [ ] **Gadget effective area marking** — visualize gadget influence zones
 - [ ] **Per-round entity prefix validation** — R01=0xF006, R02=0xF005, etc. instead of heuristic prefix detection
 - [ ] **Barricade proximity ownership** — assign barricades to nearest same-team player
-- [ ] **Entity health events** — drone destruction, gadget damage tracking for non-player entities
+- [x] **Entity health events** — `DestructionEvents` and `ReviveEvents` cover drone / gadget HP transitions
 - [ ] **Web UI** — browser-based 2D/3D replay viewer with timeline scrubbing
 - [ ] **Multi-round batch processing** — analyze entire match folders, aggregate stats across rounds
 
