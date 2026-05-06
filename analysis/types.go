@@ -390,6 +390,14 @@ type BinaryMatchEvent struct {
 	VictimTeam     int    `json:"victimTeam,omitempty"`      // KillEnum4 - 1
 	WeaponID       uint64 `json:"weaponId,omitempty"`        // hash 0x65DD6CF8 — session-variable ID of killing weapon
 	HeadshotByte   uint8  `json:"headshotByte,omitempty"`    // hash 0x4EA45BC3 — corroborating HS flag
+
+	// TLV hashes that only surface in the SECONDARY sub-stream copies of a kill
+	// record (each kill is replicated 1-4 times by different replay sub-streams).
+	// They are merged in from later duplicates by ExtractBinaryFeedback.
+	SubstreamFlag uint8  `json:"substreamFlag,omitempty"` // hash 0x2219EC10 — always 1 when present, marks duplicate copies
+	ExtraEnumA    uint32 `json:"extraEnumA,omitempty"`    // hash 0xEDB81094 — u32, observed 0..4, semantics TBD
+	ExtraEnumB    uint32 `json:"extraEnumB,omitempty"`    // hash 0x694D0B82 — u32, observed 0..3, semantics TBD
+	ExtraEnumC    uint32 `json:"extraEnumC,omitempty"`    // hash 0xC470472F — u32, observed 2..5, semantics TBD
 }
 
 // LibraryCameraFrame is a camera look-direction sample from the dissect library.

@@ -26,6 +26,14 @@ const (
 	// Decoded extra hashes (R06 analysis):
 	kHashWeaponID     uint32 = 0x65DD6CF8 // u64 session-variable ID of killing weapon
 	kHashHeadshotByte uint32 = 0x4EA45BC3 // u8, corroborates byte-offset headshot detection
+	// Extra TLVs found in DUPLICATE kill records (sub-streams):
+	// each kill is replicated 1-4 times in the binary by different replay
+	// sub-streams. Some hashes only appear in the secondary duplicates and
+	// are missed by code that scans only the first occurrence.
+	kHashSubstreamFlag uint32 = 0x2219EC10 // u8=1 marker present only on duplicate kill records
+	kHashExtraEnumA    uint32 = 0xEDB81094 // u32, observed values 0..4
+	kHashExtraEnumB    uint32 = 0x694D0B82 // u32, observed values 0..3
+	kHashExtraEnumC    uint32 = 0xC470472F // u32, observed values 2..5
 )
 
 // fillExtendedKillTLVs scans the area around a kill marker for the seven extended
@@ -98,6 +106,22 @@ func fillExtendedKillTLVs(data []byte, killOff, window int, ev *BinaryMatchEvent
 				ev.HeadshotByte = data[j+6]
 				have.hsb = true
 			}
+		case kHashSubstreamFlag:
+			if typeByte == 0x01 && j+7 <= len(data) {
+				ev.SubstreamFlag = data[j+6]
+			}
+		case kHashExtraEnumA:
+			if ev.ExtraEnumA == 0 && typeByte == 0x04 && j+10 <= len(data) {
+				ev.ExtraEnumA = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashExtraEnumB:
+			if ev.ExtraEnumB == 0 && typeByte == 0x04 && j+10 <= len(data) {
+				ev.ExtraEnumB = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
+		case kHashExtraEnumC:
+			if ev.ExtraEnumC == 0 && typeByte == 0x04 && j+10 <= len(data) {
+				ev.ExtraEnumC = binary.LittleEndian.Uint32(data[j+6 : j+10])
+			}
 		}
 	}
 	// Compute decoded team fields (KillEnum3 = AttackerTeam+1, KillEnum4 = VictimTeam+1).
@@ -118,6 +142,10 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 		typ, attacker, target string
 	}
 	seen := make(map[eventKey]bool)
+	// eventIdxByKey maps a unique kill identity to its index in events so
+	// subsequent sub-stream duplicates can merge their TLVs into the first
+	// event recorded. Indices are stable across append() unlike pointers.
+	eventIdxByKey := make(map[eventKey]int)
 	var events []BinaryMatchEvent
 
 	for i := 0; i+5 < len(data); i++ {
@@ -192,24 +220,28 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 		}
 
 		key := eventKey{evType, attacker, target}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
 		t := tickOffsetToElapsed(int64(i), ticks, totalDuration)
-		ev := BinaryMatchEvent{
-			Offset:   int64(i),
-			Type:     evType,
-			Attacker: attacker,
-			Target:   target,
-			Headshot: headshot,
-			TimeSecs: t,
+		if !seen[key] {
+			seen[key] = true
+			ev := BinaryMatchEvent{
+				Offset:   int64(i),
+				Type:     evType,
+				Attacker: attacker,
+				Target:   target,
+				Headshot: headshot,
+				TimeSecs: t,
+			}
+			fillExtendedKillTLVs(data, i, dbnoWindowBytes, &ev)
+			events = append(events, ev)
+			eventIdxByKey[key] = len(events) - 1
+		} else if idx, ok := eventIdxByKey[key]; ok {
+			// Subsequent sub-stream duplicate of the same kill. Some TLV hashes
+			// (notably substreamFlag, extraEnumA/B/C) only appear in the
+			// secondary duplicates, so we merge any still-zero fields.
+			fillExtendedKillTLVs(data, i, dbnoWindowBytes, &events[idx])
 		}
-		fillExtendedKillTLVs(data, i, dbnoWindowBytes, &ev)
-		events = append(events, ev)
 
-		// Emit separate DBNO event
+		// Emit separate DBNO event the same way (merge across duplicates).
 		if isDBNO {
 			dbnoKey := eventKey{"dbno", attacker, target}
 			if !seen[dbnoKey] {
@@ -224,6 +256,9 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 				}
 				fillExtendedKillTLVs(data, i, dbnoWindowBytes, &dbnoEv)
 				events = append(events, dbnoEv)
+				eventIdxByKey[dbnoKey] = len(events) - 1
+			} else if idx, ok := eventIdxByKey[dbnoKey]; ok {
+				fillExtendedKillTLVs(data, i, dbnoWindowBytes, &events[idx])
 			}
 		}
 	}
