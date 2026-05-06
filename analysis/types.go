@@ -216,6 +216,14 @@ type HealthUpdate struct {
 	EntityRef   uint32  `json:"entityRef,omitempty"` // non-zero for non-player entity health events
 	TimeSecs    float32 `json:"timeSecs,omitempty"`
 	BinOffset   int     `json:"binOffset"`
+
+	// Co-located health properties scanned from the same record window.
+	// All four hashes are documented in docs/BINARY_FORMAT.md but were
+	// previously dropped during extraction.
+	MaxHealth  float32 `json:"maxHealth,omitempty"`  // hash 0xC2D846F8
+	DamageRate float32 `json:"damageRate,omitempty"` // hash 0x475BB68B (0.067=DoT, 0.133=bullets)
+	HitCounter float32 `json:"hitCounter,omitempty"` // hash 0xF634093A (encoded as float, integer-valued in practice)
+	HealthTime float32 `json:"healthTime,omitempty"` // hash 0x848F67CF (server-side timestamp float)
 }
 
 // HealthEvent is a health change for any entity (player, drone, gadget).

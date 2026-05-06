@@ -435,11 +435,13 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 		// Assign timing via min-max over the combined health update offset range.
 		if len(reader.HealthUpdates) > 0 {
 			for _, hu := range reader.HealthUpdates {
-				output.Analysis.HealthUpdates = append(output.Analysis.HealthUpdates, analysis.HealthUpdate{
+				h := analysis.HealthUpdate{
 					PlayerIndex: hu.PlayerIndex,
 					Health:      hu.Health,
 					BinOffset:   hu.BinOffset,
-				})
+				}
+				analysis.FillHealthSubProps(rawData, hu.BinOffset, &h)
+				output.Analysis.HealthUpdates = append(output.Analysis.HealthUpdates, h)
 			}
 			// Re-apply min-max timing over all health updates (binary scanner + library).
 			if len(output.Analysis.HealthUpdates) > 0 {

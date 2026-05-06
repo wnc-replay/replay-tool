@@ -5,7 +5,14 @@ import (
 	"math"
 )
 
-const healthHash = 0x4171D3C3 // health property hash
+const (
+	healthHash       = 0x4171D3C3 // health value (f32, 0..130)
+	maxHealthHash    = 0xC2D846F8 // max health (f32, 0 or 100)
+	damageRateHash   = 0x475BB68B // damage tick rate (f32, e.g. 0.067 for DoT, 0.133 for bullets)
+	hitCounterHash   = 0xF634093A // damage tick counter (u32)
+	healthTimeHash   = 0x848F67CF // server-side timestamp on the health record (f32)
+	healthSubWindow  = 256        // bytes scanned around a health hash for sub-properties
+)
 
 // ExtractHealthUpdates scans the full binary for health property updates
 // (hash 0x4171D3C3) and maps them to players via entity ref attribution.
@@ -49,15 +56,44 @@ func ExtractHealthUpdates(data []byte, entityToPlayer map[uint32]int, ticks []Ti
 			pIdx = -1
 		}
 
-		updates = append(updates, HealthUpdate{
+		hu := HealthUpdate{
 			PlayerIndex: pIdx,
 			Health:      hp,
 			EntityRef:   entityRef,
 			BinOffset:   i,
-		})
+		}
+		FillHealthSubProps(data, i, &hu)
+		updates = append(updates, hu)
 	}
 
 	return updates
+}
+
+// FillHealthSubProps scans within healthSubWindow bytes of the health hash
+// for the four documented co-located property hashes and writes their values
+// into hu. Each property follows the [hash 4B][value 4B] layout.
+func FillHealthSubProps(data []byte, healthOff int, hu *HealthUpdate) {
+	start := healthOff - healthSubWindow
+	if start < 0 {
+		start = 0
+	}
+	end := healthOff + healthSubWindow
+	if end+8 > len(data) {
+		end = len(data) - 8
+	}
+	for j := start; j+8 <= end; j++ {
+		h := binary.LittleEndian.Uint32(data[j : j+4])
+		switch h {
+		case maxHealthHash:
+			hu.MaxHealth = math.Float32frombits(binary.LittleEndian.Uint32(data[j+4 : j+8]))
+		case damageRateHash:
+			hu.DamageRate = math.Float32frombits(binary.LittleEndian.Uint32(data[j+4 : j+8]))
+		case hitCounterHash:
+			hu.HitCounter = math.Float32frombits(binary.LittleEndian.Uint32(data[j+4 : j+8]))
+		case healthTimeHash:
+			hu.HealthTime = math.Float32frombits(binary.LittleEndian.Uint32(data[j+4 : j+8]))
+		}
+	}
 }
 
 // findPrecedingEntity scans BACKWARD up to radius bytes for the nearest
