@@ -114,6 +114,8 @@ type EntityTrack struct {
 	ProjectileType string        `json:"projectileType,omitempty"`
 	BarricadeType  string        `json:"barricadeType,omitempty"`
 	OwnerLabel     string        `json:"ownerLabel,omitempty"`
+	OwnerPlayerIdx *int          `json:"ownerPlayerIndex,omitempty"` // inferred owner for barricades / gadgets (nil if unknown — distinguishes "no owner" from playerIndex 0)
+	OwnerDistance  float32       `json:"ownerDistance,omitempty"`    // distance (m) from owner at spawn — confidence indicator
 	TeamIndex      int           `json:"teamIndex"`
 	SpawnCounter   uint32        `json:"spawnCounter,omitempty"`
 	HealthEvents   []HealthEvent `json:"healthEvents,omitempty"`

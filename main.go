@@ -484,6 +484,11 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 				}
 			}
 		}
+
+		// Once entity types are finalised, attach each barricade to the nearest
+		// same-team player at spawn time. Must run after library reclassification
+		// because the binary scanner often labels these entities "unknown".
+		analysis.AssignBarricadeOwners(output.Analysis.Entities, output.Analysis.Players)
 	}
 
 	return output

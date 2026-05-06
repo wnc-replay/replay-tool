@@ -613,3 +613,78 @@ func BuildTracksFromLibraryPositions(positions []LibraryPosition) []*internalTra
 
 	return tracks
 }
+
+// AssignBarricadeOwners attaches each barricade entity to the nearest same-team
+// player at the moment the barricade first appears. Reinforced walls and
+// barricaded windows / doors are placed by the defending team, so we restrict
+// the search to defenders. The result is written back into entities[].OwnerPlayerIdx
+// (-1 if no nearby player can be found) and entities[].OwnerDistance.
+//
+// This is a best-effort heuristic: a defender can place a barricade across a
+// room from where another defender stands, so consumers should treat distances
+// above ~5 m with caution.
+func AssignBarricadeOwners(entities []EntityTrack, players []PlayerTrack) {
+	if len(entities) == 0 || len(players) == 0 {
+		return
+	}
+
+	for i := range entities {
+		e := &entities[i]
+		if e.Type != "barricade" {
+			continue
+		}
+		// First non-zero frame is the spawn position
+		var bx, by, bz float32
+		var btime float32
+		gotPos := false
+		for _, f := range e.Frames {
+			if f.X != 0 || f.Y != 0 {
+				bx, by, bz = f.X, f.Y, f.Z
+				btime = f.TimeSecs
+				gotPos = true
+				break
+			}
+		}
+		if !gotPos {
+			continue
+		}
+
+		bestIdx := -1
+		bestDist := float32(math.MaxFloat32)
+		for _, p := range players {
+			// Defenders are non-attackers. Skip attackers.
+			if p.IsAttacker {
+				continue
+			}
+			// Find the player frame closest in time to the barricade spawn.
+			var pFrame *PosFrame
+			minDt := float32(math.MaxFloat32)
+			for k := range p.Frames {
+				dt := p.Frames[k].TimeSecs - btime
+				if dt < 0 {
+					dt = -dt
+				}
+				if dt < minDt {
+					minDt = dt
+					pFrame = &p.Frames[k]
+				}
+			}
+			if pFrame == nil || (pFrame.X == 0 && pFrame.Y == 0) {
+				continue
+			}
+			dx := pFrame.X - bx
+			dy := pFrame.Y - by
+			dz := pFrame.Z - bz
+			d := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
+			if d < bestDist {
+				bestDist = d
+				bestIdx = p.PlayerIndex
+			}
+		}
+		if bestIdx >= 0 {
+			idx := bestIdx
+			e.OwnerPlayerIdx = &idx
+			e.OwnerDistance = bestDist
+		}
+	}
+}
