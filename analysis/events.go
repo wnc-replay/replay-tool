@@ -8,10 +8,15 @@ import (
 
 // ExtractBinaryFeedback parses kill/death/DBNO events directly from the binary.
 // Kill signature: 22 D9 13 3C BA
-// DBNO signature: 22 96 E2 29 7F (within ±70 bytes of kill)
+// DBNO signature: 22 96 E2 29 7F (within dbnoWindowBytes of kill)
 func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32) []BinaryMatchEvent {
 	killSig := []byte{0x22, 0xD9, 0x13, 0x3C, 0xBA}
 	dbnoSig := []byte{0x22, 0x96, 0xE2, 0x29, 0x7F}
+
+	// On Y11S1+ replays the kill record carries up to 8 extra TLV fields after
+	// the previously-known headshot byte, pushing the DBNO marker further away
+	// than the legacy 70-byte window. 256 bytes covers all observed cases.
+	const dbnoWindowBytes = 256
 
 	type eventKey struct {
 		typ, attacker, target string
@@ -68,13 +73,13 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 			continue
 		}
 
-		// Check for DBNO marker within ±70 bytes
+		// Check for DBNO marker within dbnoWindowBytes of the kill signature
 		isDBNO := false
-		searchStart := i - 70
+		searchStart := i - dbnoWindowBytes
 		if searchStart < 0 {
 			searchStart = 0
 		}
-		searchEnd := i + 70
+		searchEnd := i + dbnoWindowBytes
 		if searchEnd+5 > len(data) {
 			searchEnd = len(data) - 5
 		}
