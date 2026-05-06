@@ -137,11 +137,13 @@ type PlayerInfoHeader struct {
 }
 
 type FeedbackInfo struct {
-	Type     string `json:"type"`
-	Username string `json:"username,omitempty"`
-	Target   string `json:"target,omitempty"`
-	Headshot bool   `json:"headshot,omitempty"`
-	Time     string `json:"time,omitempty"`
+	Type       string `json:"type"`
+	Username   string `json:"username,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Headshot   bool   `json:"headshot,omitempty"`
+	Time       string `json:"time,omitempty"`
+	DBNOBy     string `json:"dbnoBy,omitempty"`     // username who downed the target (DBNO event or kill that finished a DBNO)
+	FinishedBy string `json:"finishedBy,omitempty"` // username who finished a previously-downed target
 }
 
 func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOutput {
@@ -204,11 +206,13 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			hs = *mf.Headshot
 		}
 		fb := FeedbackInfo{
-			Type:     mf.Type.String(),
-			Username: mf.Username,
-			Target:   mf.Target,
-			Headshot: hs,
-			Time:     mf.Time,
+			Type:       mf.Type.String(),
+			Username:   mf.Username,
+			Target:     mf.Target,
+			Headshot:   hs,
+			Time:       mf.Time,
+			DBNOBy:     mf.DBNOBy,
+			FinishedBy: mf.FinishedBy,
 		}
 		header.MatchFeedback = append(header.MatchFeedback, fb)
 	}
