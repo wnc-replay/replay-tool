@@ -126,11 +126,12 @@ type PlayerInfoHeader struct {
 }
 
 type FeedbackInfo struct {
-	Type     string `json:"type"`
-	Username string `json:"username,omitempty"`
-	Target   string `json:"target,omitempty"`
-	Headshot bool   `json:"headshot,omitempty"`
-	Time     string `json:"time,omitempty"`
+	Type     string  `json:"type"`
+	Username string  `json:"username,omitempty"`
+	Target   string  `json:"target,omitempty"`
+	Headshot bool    `json:"headshot,omitempty"`
+	Time     string  `json:"time,omitempty"`
+	TimeSecs float64 `json:"timeSecs,omitempty"`
 }
 
 func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOutput {
@@ -198,6 +199,7 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 			Target:   mf.Target,
 			Headshot: hs,
 			Time:     mf.Time,
+			TimeSecs: mf.TimeInSeconds,
 		}
 		header.MatchFeedback = append(header.MatchFeedback, fb)
 	}
