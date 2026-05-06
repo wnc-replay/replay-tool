@@ -97,6 +97,17 @@ type FullOutput struct {
 	Header          HeaderInfo              `json:"header"`
 	Analysis        *analysis.RoundAnalysis `json:"analysis,omitempty"`
 	LibraryLoadouts []LibraryLoadoutEntry   `json:"libraryLoadouts,omitempty"`
+	DefuserTicks    []DefuserTickEntry      `json:"defuserTicks,omitempty"`
+}
+
+// DefuserTickEntry is one frame of the plant/disable timer streamed by the
+// engine. Useful to render progress bars or detect cancelled disables.
+type DefuserTickEntry struct {
+	TimeSecs  float64 `json:"timeSecs"`
+	Time      string  `json:"time,omitempty"`
+	RawValue  float64 `json:"rawValue"`
+	PrevValue float64 `json:"prevValue,omitempty"`
+	State     string  `json:"state"` // "planting" / "disabling" / "planted_idle"
 }
 
 // LibraryLoadoutEntry mirrors dissect.PlayerLoadout for the JSON output.
@@ -291,7 +302,23 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 		libLoadouts = append(libLoadouts, entry)
 	}
 
-	output := FullOutput{Header: header, LibraryLoadouts: libLoadouts}
+	// Defuser plant/disable timer ticks (every frame the engine streams a value)
+	var defuserTicks []DefuserTickEntry
+	for _, dt := range reader.DefuserTicks {
+		defuserTicks = append(defuserTicks, DefuserTickEntry{
+			TimeSecs:  dt.TimeInSeconds,
+			Time:      dt.Time,
+			RawValue:  dt.RawValue,
+			PrevValue: dt.PrevValue,
+			State:     dt.State,
+		})
+	}
+
+	output := FullOutput{
+		Header:          header,
+		LibraryLoadouts: libLoadouts,
+		DefuserTicks:    defuserTicks,
+	}
 
 	if headerOnly {
 		return output

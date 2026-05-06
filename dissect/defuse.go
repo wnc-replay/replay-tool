@@ -7,6 +7,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// DefuserTick is a single sample of the defuser/plant timer that the engine
+// streams while a plant or disable is in progress. RawValue is the floating
+// timer value emitted by the engine; PrevValue is the previous tick (useful
+// to detect direction changes). State is the high-level phase the library
+// inferred at this tick.
+type DefuserTick struct {
+	TimeInSeconds float64 `json:"timeInSeconds"`
+	Time          string  `json:"time"`
+	RawValue      float64 `json:"rawValue"`
+	PrevValue     float64 `json:"prevValue"`
+	State         string  `json:"state"` // "planting" / "disabling" / "planted_idle"
+}
+
 func (r *Reader) getTeamByRole(role TeamRole) int {
 	for i, team := range r.Header.Teams {
 		if team.Role == role {
@@ -51,6 +64,23 @@ func readDefuserTimer(r *Reader) error {
 			timerValue = v
 		}
 	}
+
+	// Record the raw tick so consumers can render disable progress bars.
+	tickState := "planting"
+	if r.planted {
+		if r.defuserDisabling || (timerValue >= 0 && prevTimer >= 0 && timerValue > prevTimer) {
+			tickState = "disabling"
+		} else {
+			tickState = "planted_idle"
+		}
+	}
+	r.DefuserTicks = append(r.DefuserTicks, DefuserTick{
+		TimeInSeconds: r.time,
+		Time:          r.timeRaw,
+		RawValue:      timerValue,
+		PrevValue:     prevTimer,
+		State:         tickState,
+	})
 
 	var playerIndex int = -1
 

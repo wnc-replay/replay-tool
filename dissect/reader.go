@@ -58,6 +58,7 @@ type Reader struct {
 	HealthUpdates   []HealthUpdate   `json:"healthUpdates,omitempty"`
 	TimerTicks      []TimerTick      `json:"timerTicks,omitempty"`
 	TimerPhases     []TimerPhase     `json:"timerPhases,omitempty"`
+	DefuserTicks    []DefuserTick    `json:"defuserTicks,omitempty"`
 	RecordingPlayer int              `json:"recordingPlayer"` // player index of the recorded POV, -1 if unknown
 	Scoreboard      Scoreboard
 }
