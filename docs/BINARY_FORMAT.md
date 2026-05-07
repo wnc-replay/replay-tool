@@ -20,13 +20,20 @@ After decompression, the binary contains:
 **Archetype**: `0xFE857360` (LE bytes: `60 73 85 FE`)
 
 ```
-Offset from pattern:
-  -16..-13  Entity ref (u32 LE, F0-prefix for players)
-   -8..-5   Packet size (u32 LE)
+Offset from pattern (i = first byte of pattern):
+  -12..-9   Entity ref low 32b (u32 LE, F0-prefix for game entities)
+   -8..-5   Entity ref high 32b — always 0 (the engine's u64 id is sparse)
+   -4..-1   Packet size (u32 LE)
     0.. 3   Pattern [60 73 85 FE]
     4.. 5   Type field (u16 LE, bitfield)
-    6+       Payload
+   +6..+7   Echo of entity ref low 16b
+    8+       Payload
 ```
+
+> **NOTE**: an earlier revision of this doc placed the entity ref at `-16..-13`
+> and the packet size at `-8..-5`. Those positions hold zero / arbitrary
+> bytes (verified on every replay in the corpus); the real layout matches
+> `dissect/movement.go` (`r.b[i-12:i-8]` for ref, `r.b[i-4:i]` for size).
 
 **Type field bits**:
 - Bit 7 of byte[0] (`& 0x80`): position data present (3× f32 XYZ at payload start)
@@ -41,18 +48,81 @@ Offset from pattern:
 **Archetype**: `0xFE857361` (LE bytes: `61 73 85 FE`)
 
 ```
-  -12..-9   Entity ref (u32 LE)
+Offset from pattern (i = first byte of pattern):
+  -12..-9   Entity ref low 32b (u32 LE)
+   -8..-5   Entity ref high 32b — always 0
+   -4..-1   Counter (u32 LE)
     0.. 3   Pattern [61 73 85 FE]
-    8.. 9   Counter (u16 LE)
+   +4..+7   Echo of entity ref low 32b
+   +8..+11  Always 0
+   +60..+63 hashA (u32 LE) — gadget/sub-type identifier (not present on all counters)
+   +64..+67 hashB (u32 LE) — paired with hashA for some counter=146 entities
 ```
 
-**Counter values**:
-- 494: player entity assignment record
-- 154: drone
-- 146: gadget
-- 130: barricade (confirmed with FC-UPDATE flag `0x1FE0`)
-- 138: primary weapon
-- 254: secondary weapon
+> **NOTE**: an earlier revision of this doc placed the counter at `+8..+9` as
+> a `u16`. Those bytes are always zero (high 16 bits of the entity ref echo);
+> the real counter is the u32 at `-4..-1`, matching `dissect/movement.go`
+> (`r.b[i-4:i]`). Counters use the full 32-bit width — values up to 494
+> appear in normal replays, so a `u16` read happens to truncate to the same
+> low byte but mis-types the field.
+
+**Counter values** observed across 79 Y11S1 R06 replays (31 038 SPAWN
+records, by descending population):
+
+| Counter | Per-match avg | Mapped meaning | Source |
+|--------:|--------------:|----------------|--------|
+| `98`  | 54.7 | projectile / VFX (paired with `266`) | distribution analysis |
+| `94`  | 30.6 | unknown — not classified | – |
+| `142` | 44.5 | secondary gadget (impact, claymore, jammer, …) | `dissect.classifySpawnCounters` |
+| `130` | 43.9 | barricade (door / window / hatch reinforcement) | `dissect.classifySpawnCounters` |
+| `146` | 35.4 | deployed gadget | `dissect.classifySpawnCounters` |
+| `138` | 33.8 | primary weapon (or Azami Kiba, by spawn hash) | `dissect.classifySpawnCounters` |
+| `126` | 33.5 | Alibi Prisma — and other counter-126 carriers | `dissect.classifySpawnCounters` |
+| `254` | 29.8 | secondary weapon | `dissect.classifySpawnCounters` |
+| `122` | 22.2 | unknown — short hashA values (`0x0000XXXX`) suggest spawn-point indices | – |
+| `266` | 20.0 | projectile / VFX phase 2 (same hashA as `98`) | distribution analysis |
+| `154` | 15.1 | player-controlled drone | `dissect.classifySpawnCounters` |
+| `494` | 10.0 | player entity (one per loadout slot) | `dissect.classifySpawnCounters` |
+| `150` | 5.7  | deployable secondary equipment (shield, …) | `dissect.classifySpawnCounters` |
+| `158`/`162`/`110`/`90` | <0.1 | rare — undecoded | – |
+
+#### Spawn hashA distribution per counter
+
+`hashA = u32 LE at pattern + 60`. Distinct hashAs (>1 % of total) seen on
+the 79-replay corpus:
+
+| Counter | hashA | % of counter | Mapped (lib) |
+|--------:|-------|-------------:|--------------|
+| 154 (drone) | `0xF6E54772` | 98.9 | **not mapped** — universal attacker drone |
+| 154 | `0x1CA56E9A` | 0.8 | shared family (Mira/shield) — likely Twitch shock-drone |
+| 154 | `0x3413CEF7` | 0.3 | rare drone variant |
+| 146 (gadget) | `0x133B51F7` | 61.5 | **not mapped** |
+| 146 | `0xF69084B2` | 28.8 | **not mapped** |
+| 146 | `0x133B519A` | 5.4 | partial — pairs with hashB give Kona / Banshee / ADS / Mira |
+| 146 | `0x59F6D09A` | 2.8 | **not mapped** |
+| 130 (barricade) | `0x1CA56E9A` | 66.5 | barricade family (also Mira/shield) |
+| 130 | `0x133B51F7` | 28.1 | **not mapped** — likely reinforced wall |
+| 130 | `0x133B519A` | 4.0 | Mira/Castle family |
+| 142 (sec gadget) | `0x2D1E3A9A` | 4.0 | Mute Jammer ✓ |
+| 142 | `0xD2F8F39A` | 2.9 | Bandit Battery ✓ |
+| 142 | `0x2D20B99A` | 2.6 | **not mapped** |
+| 142 | `0xFC72B39A` | 2.4 | Goyo Canister ✓ |
+| 142 | `0x2D1E3B16` | 1.6 | Nitro Cell C4 ✓ |
+| 138 (primary weapon) | `0x00005EFC` etc. | 28+ | **not mapped** — short IDs (likely weapon-class index, not a hash) |
+| 138 | `0x9B72AE9A` | 3.2 | Azami Kiba ✓ |
+| 254 (sec weapon) | `0xD65547F7` etc. | varied | **not mapped** — ~30 distinct IDs (one per pistol model) |
+| 150 (deployable) | `0x86604C72` | 25.1 | **not mapped** |
+| 150 | `0x133B51F7` | 21.5 | **not mapped** |
+| 150 | `0x1CA56E9A` | 16.3 | Deployable Shield ✓ |
+| 98 (projectile) | `0xA9CE56F7` | 98.8 | **not mapped** — universal projectile |
+| 266 (projectile p2) | `0xA9CE56F7` | 99.2 | **not mapped** — same as counter 98 |
+
+> **`__9A` vs `__16` family pattern** (counter=142): every gadget hash with
+> the `9A` low byte is a *placed* utility (jammer, battery, canister, kiba);
+> every hash with the `16` low byte is a *thrown* explosive (C4 = `0x2D1E3B16`,
+> plus 7 unmapped `XXXX_XX16` siblings). The low byte appears to be a class
+> tag in the underlying name hash — useful as a fallback classifier when
+> the exact gadget is not yet identified.
 
 ## Bone Data
 
@@ -225,6 +295,48 @@ Values: `0.0` (dead), `100.0` (full), intermediates = damage taken.
 | `0xF634093A` | Hit/tick counter |
 | `0x475BB68B` | Damage rate (0.067=DoT, 0.133=bullets) |
 | `0xC2D846F8` | Max health (0 or 100) |
+
+## Per-entity TLV catalogue (0x23 marker)
+
+Beside the kill-record TLVs documented above, the binary stream carries a
+large catalogue of per-entity property updates encoded as
+`0x23 [ref8] [hash u32 LE] [type] [value]`. The entity ref is the F0-prefix
+id of the SPAWN entity (or a sub-entity that does not get its own SPAWN —
+this is common for world-state and animation sub-objects).
+
+The table below lists every hash that occurred more than 1 000 times across
+the 79-replay corpus, with the value type observed and our best current
+interpretation. Items marked **probable** match a clear value pattern but
+have not been cross-validated against game behaviour; treat them as hints,
+not contracts.
+
+| Hash | Type | Occurrences | Distinct entities | Probable meaning |
+|------|------|------------:|------------------:|------------------|
+| `0xA374F4B6` | u32 | 697 184 | 1 369 | Per-entity tick / sequence counter (values 0..249, monotone in time) — **probable** |
+| `0x6C463718` | u32 | 337 182 | 79 (= one per replay) | **Round timestamp ms** — already in `BinaryMatchEvent.RoundTimeMs` (verified against `MatchFeedback.TimeInSeconds`) |
+| `0xA80080B0` | u8 | 76 146 | 3 294 | Boolean flag (~42 entities/match) — active/inactive state — **probable** |
+| `0xD373835C` | f32 | 68 591 | 942 | Animation lerp 0..1 — **probable** |
+| `0x54E5D055` | f32 | 69 725 | 138 | Animation lerp 0..1 — **probable** |
+| `0xCA9998AF` | u64 | 27 515 | 1 667 | Sentinel `0xFFFFFFFFFFFFFFFF` — points to the SPAWN system (CRC32 of the SPAWN pattern) |
+| `0xC13FD73B` | u8 | 25 454 | 4 810 | Boolean flag (~61 entities/match) — visibility / replication-side — **probable** |
+| `0xC1406A0D` | f32 | 22 898 | 3 766 | Values cluster 88..110, sometimes 0; **not** entity HP (max > 100). Possibly speed scalar or animation timer — **uncertain** |
+| `0x0AD3AA3E` | u64 | 14 317 | 2 850 | Entity ref (parent / owner) — **probable** |
+| `0x6252FDFF` | u32 | 13 122 | 6 382 | Small enum 0/1/2 — **probable** state field |
+| `0xC9EF071F` | u32 | 12 944 | 79 (= one per replay) | Per-replay tick counter (one entity = world state) — **probable** server tick |
+| `0x2477AC66` | u32 | 12 819 | 1 398 | Small enum 0..3 — **probable** |
+| `0xEC0D4FF6` | f32 | 10 477 | 20 (= 1 entity in 20/79 replays) | f32 0..1 lerp — only present in some rounds; candidates: defuser progress, drone deploy animation — **uncertain** |
+| `0xD48DDCA4` | u8 | 10 065 | 789 | Boolean flag — **probable** |
+| `0xA436B096` | f32 | 9 557 | 73 | Animation lerp 0..1 — **probable** |
+| `0x88BE9E0E` | u64 | 8 655 | 7 482 | "Session item id" — values fall into families (`0x1F1E397...`, `0x516BC...`) but **none match `gameItemNames`**. Probably session-scoped instance IDs — **uncertain** |
+| `0xAFB7ACBC` | u8 | 8 363 | 1 679 | Always `1` — sub-stream presence marker — **probable** |
+| `0x804FDAEC` | u32 | 6 837 | 948 | Small counter — **uncertain** |
+| `0xD55F88F8` | u8 | 6 508 | 1 001 | Boolean flag — **probable** |
+| `0x78B46D4F` | u8 | 6 175 | 941 | Boolean flag — **probable** |
+| `0x4E254E7C` | u64 | 26 | 21 | **Operator role-portrait id** — values match the `roleImage` field of player-header records (e.g. `375628889901` = Bal0uX' Azami portrait) — **probable** |
+
+> Aggregated from `cmd/entprops23` over 79 R06 / Y11S1 replays. Type
+> mixing (u8 + u32 on the same hash) was treated as separate entries; only
+> single-type hashes are listed here.
 
 ## Scoreboard
 
