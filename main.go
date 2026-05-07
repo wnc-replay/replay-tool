@@ -711,6 +711,12 @@ func buildOutput(reader *dissect.Reader, rawData []byte, headerOnly bool) FullOu
 				if te.BarricadeType != "" {
 					output.Analysis.Entities[i].BarricadeType = te.BarricadeType
 				}
+				if te.SpawnCounter != 0 && output.Analysis.Entities[i].SpawnCounter == 0 {
+					output.Analysis.Entities[i].SpawnCounter = te.SpawnCounter
+				}
+				if te.SpawnHashA != 0 && output.Analysis.Entities[i].SpawnHashA == 0 {
+					output.Analysis.Entities[i].SpawnHashA = te.SpawnHashA
+				}
 			}
 			// Filter transient/sub-entities. Binary inspection of the SPAWN pattern (61 73 85 FE)
 			// shows ALL 376 matches have counter=0 — the real classification (counter=130/138/146/154/254)

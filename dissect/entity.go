@@ -27,6 +27,7 @@ type TrackedEntity struct {
 	OperatorIndex  int              `json:"operatorIndex"`            // player currently viewing/controlling the drone, -1 if unknown
 	Team           TeamRole         `json:"team"`                     // "Attack" or "Defense"
 	SpawnCounter   uint32           `json:"spawnCounter,omitempty"`   // SPAWN counter value (146=gadget, 154=drone, 130=barricade, 138/254=weapon)
+	SpawnHashA     uint32           `json:"spawnHashA,omitempty"`     // hashA at SPAWN +60 — gadget/sub-type identifier; see docs/BINARY_FORMAT.md "Spawn hashA distribution per counter"
 	HealthEvents   []HealthEvent    `json:"healthEvents,omitempty"`   // health changes extracted from binary
 	Positions      []EntityPosition `json:"positions"`
 }

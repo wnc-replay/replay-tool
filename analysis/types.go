@@ -222,6 +222,7 @@ type EntityTrack struct {
 	OwnerDistance  float32       `json:"ownerDistance,omitempty"`    // distance (m) from owner at spawn — confidence indicator
 	TeamIndex      int           `json:"teamIndex"`
 	SpawnCounter   uint32        `json:"spawnCounter,omitempty"`
+	SpawnHashA     uint32        `json:"spawnHashA,omitempty"` // hashA at SPAWN+60 — see docs/BINARY_FORMAT.md
 	HealthEvents   []HealthEvent `json:"healthEvents,omitempty"`
 	Frames         []PosFrame    `json:"frames"`
 }

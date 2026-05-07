@@ -2585,6 +2585,35 @@ var spawnHash126GadgetType = map[uint32]string{
 	0x45324600: "prisma", // Alibi Prisma
 }
 
+// spawnHash154DroneType maps hashA at +60 for counter=154 (drone) entities.
+// Distribution observed across 79 Y11S1 R06 replays / 1 195 drone entities:
+//
+//	0xF6E54772 → 1182 / 1195 (98.9 %) → standard attacker drone
+//	0x1CA56E9A →   10 / 1195 ( 0.8 %) → shared with Mira / shield family —
+//	                                    likely Twitch shock-drone (only attacker
+//	                                    that runs counter=154 with a non-default
+//	                                    spawn hash). Not surfaced as a separate
+//	                                    type until cross-validated.
+//	0x3413CEF7 →    3 / 1195 ( 0.3 %) → rare drone variant — not surfaced.
+var spawnHash154DroneType = map[uint32]string{
+	0xF6E54772: "drone", // universal attacker drone — verified at 99 % across 79 Y11S1 replays
+}
+
+// projectileVfxHash is the hashA at +60 of counter=98 / counter=266 SPAWN
+// records that the engine writes for short-lived projectile / VFX entities
+// (bullet impact effect, grenade fragments, drone-deploy puff, …).
+//
+// Distribution across 79 Y11S1 R06 replays:
+//
+//	counter=98  + hashA=0xA9CE56F7 → 4 270 / 4 323 (98.8 %)
+//	counter=266 + hashA=0xA9CE56F7 → 1 569 / 1 581 (99.2 %)
+//
+// Total ~74 entities per round — too few to be individual bullets, dense
+// enough to dominate the "unknown" entity bucket. Tagging them as
+// EntityProjectile with sub-type "vfx" cleans up the entity list and lets
+// downstream callers filter them out in one line.
+const projectileVfxHash = uint32(0xA9CE56F7)
+
 // classifySpawnCounters scans the binary for SPAWN records (archetype 0xFE857361)
 // and uses the counter value to classify entity types:
 //   - 494 = player entity (used for player entity mapping)
@@ -2636,6 +2665,15 @@ func (r *Reader) classifySpawnCounters() {
 			te.GadgetType = gt
 		}
 
+		// Surface the raw hashA at SPAWN+60 for downstream analysis. Many
+		// counter+hashA combinations remain unmapped (see
+		// docs/BINARY_FORMAT.md "Spawn hashA distribution per counter") —
+		// exposing the raw value lets callers identify variants the lib
+		// does not yet name.
+		if i+64 <= len(r.b) {
+			te.SpawnHashA = binary.LittleEndian.Uint32(r.b[i+60 : i+64])
+		}
+
 		switch counter {
 		case 126, 142, 146, 150:
 			// Gadget entities — use SPAWN hash if available, fall back to fingerprinting
@@ -2643,9 +2681,26 @@ func (r *Reader) classifySpawnCounters() {
 				te.Type = EntityGadget
 			}
 		case 154:
-			// Player-controlled drone
+			// Player-controlled drone — set type, and surface the variant
+			// (currently only the universal attacker drone is identified).
 			if te.Type != EntityDrone {
 				te.Type = EntityDrone
+			}
+			if te.GadgetName == "" {
+				if gt, ok := spawnHashes[entityID]; ok && gt == "drone" {
+					te.GadgetName = "Drone"
+				}
+			}
+		case 98, 266:
+			// Short-lived projectile / VFX entity (bullet impact, grenade
+			// fragment, drone-deploy puff, ...). Tag as projectile so
+			// downstream filters can drop them — they would otherwise pile
+			// up in the "unknown" bucket (~74 per round).
+			if gt, ok := spawnHashes[entityID]; ok && gt == "vfx" {
+				te.Type = EntityProjectile
+				if te.ProjectileType == "" {
+					te.ProjectileType = "vfx"
+				}
 			}
 		case 130:
 			// Barricade (door/window) — check FC-UPDATE flag 0x1FE0 to confirm
@@ -2722,8 +2777,9 @@ func (r *Reader) extractSpawnHashes() map[uint32]string {
 		}
 		counter := binary.LittleEndian.Uint32(r.b[i-4 : i])
 
-		// Skip player (494), drone (154), barricade (130) entities
-		if counter == 494 || counter == 154 || counter == 130 {
+		// Skip player (494), barricade (130) — these are classified by counter
+		// alone or by FC-UPDATE flag, not by spawn hash.
+		if counter == 494 || counter == 130 {
 			continue
 		}
 
@@ -2759,6 +2815,14 @@ func (r *Reader) extractSpawnHashes() map[uint32]string {
 			hash56 := binary.LittleEndian.Uint32(r.b[i+56 : i+60])
 			if gt, ok := spawnHash126GadgetType[hash56]; ok {
 				result[eid] = gt
+			}
+		case 154:
+			if gt, ok := spawnHash154DroneType[hashA]; ok {
+				result[eid] = gt
+			}
+		case 98, 266:
+			if hashA == projectileVfxHash {
+				result[eid] = "vfx"
 			}
 		}
 	}
