@@ -3,6 +3,7 @@ package analysis
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"sort"
 )
 
@@ -13,6 +14,14 @@ import (
 // Window expanded to 256 bytes for Y11S1+ (was 70). Y11 added extended TLV fields
 // between kill and DBNO markers, pushing the DBNO marker outside the old window.
 const dbnoWindowBytes = 256
+
+// extraTLVWindowBytes is the wider window used to capture the kill-record
+// sub-stream duplicates (round timestamp, killDamage, hitZone, …). The
+// 0x6C463718 ms timestamp sits up to ~800 bytes from the kill marker because
+// it lives in the secondary sub-stream copy of the kill record; ±2048 bytes
+// covers it on every observed kill while still staying well inside one round's
+// worth of replication data (kill records are tens of KB apart).
+const extraTLVWindowBytes = 2048
 
 // Hash constants for extended kill TLVs (Y11S1+, scanned in 256-byte window):
 const (
@@ -26,13 +35,32 @@ const (
 	// Decoded extra hashes (R06 analysis):
 	kHashWeaponID     uint32 = 0x65DD6CF8 // u64 session-variable ID of killing weapon
 	kHashHeadshotByte uint32 = 0x4EA45BC3 // u8, corroborates byte-offset headshot detection
+
+	// Hashes decoded from the kill-record sub-stream duplicates by scanning
+	// every TLV near the kill marker across 525 unique kills (79 replays).
+	// See BinaryMatchEvent for per-field semantics.
+	kHashRoundTimeMs   uint32 = 0x6C463718 // u32 ms since round start
+	kHashKillDamage    uint32 = 0xC9527BDD // f32 [0,1] — damage of killing bullet / max-health
+	kHashKillRange     uint32 = 0xFB9DBF08 // f32 [0,1] — weapon-dependent range / falloff factor
+	kHashHitZone       uint32 = 0xA5F688E7 // u32 enum 0/1/2/3/4 — body-part hit bucket
+	kHashVictimEnumA   uint32 = 0x31C825EC // u32 enum 1..5 (entity-scoped, 0x23 marker)
+	kHashVictimEnumB   uint32 = 0xB53D3EFA // u32 enum 1..4 (entity-scoped, 0x23 marker)
+	kHashVictimCounter uint32 = 0xA374F4B6 // u32 — likely tick/shot counter on victim pawn
+	kHashVictimEnt64   uint32 = 0x488A15F4 // u64 — stable per-victim ID (~1.25e11)
 )
 
-// fillExtendedKillTLVs scans the area around a kill marker for the seven extended
+// fillExtendedKillTLVs scans the area around a kill marker for the extended
 // TLV property hashes and writes their values into the BinaryMatchEvent.
 //
 // Each TLV is encoded as: marker (0x22 or 0x23) + hash u32 + type byte + value.
 // Type bytes: 0x01=u8, 0x04=u32, 0x08=u64.
+//
+// Note: 0x23-prefixed TLVs are entity-scoped (8-byte ref before the hash); they
+// are intentionally read with the same byte layout because the entity ref slot
+// is positioned where this scanner looks for the hash on 0x22 — which means a
+// 0x23 record's "hash" we read here is actually the first 4 bytes of the ref
+// (typically 0xF0…). Those entity-id reads are filtered out by the explicit
+// case-list in this switch, so they cause no false positives.
 func fillExtendedKillTLVs(data []byte, killOff, window int, ev *BinaryMatchEvent) {
 	start := killOff - window
 	if start < 0 {
@@ -45,6 +73,7 @@ func fillExtendedKillTLVs(data []byte, killOff, window int, ev *BinaryMatchEvent
 	// Keep the first match per hash (closer to the kill marker = more likely the right one).
 	var have struct {
 		w, f, e1, e2, e3, e4, e5, wid, hsb bool
+		rtm, kd, kr, hz, vea, veb, vc, vid bool
 	}
 	for j := start; j+9 < end; j++ {
 		if data[j] != 0x22 && data[j] != 0x23 {
@@ -97,6 +126,55 @@ func fillExtendedKillTLVs(data []byte, killOff, window int, ev *BinaryMatchEvent
 			if !have.hsb && typeByte == 0x01 && j+7 <= len(data) {
 				ev.HeadshotByte = data[j+6]
 				have.hsb = true
+			}
+		case kHashRoundTimeMs:
+			if !have.rtm && typeByte == 0x04 && j+10 <= len(data) {
+				v := binary.LittleEndian.Uint32(data[j+6 : j+10])
+				if v > 0 { // 0 is the absent/uninitialised value
+					ev.RoundTimeMs = v
+					have.rtm = true
+				}
+			}
+		case kHashKillDamage:
+			if !have.kd && typeByte == 0x04 && j+10 <= len(data) {
+				v := binary.LittleEndian.Uint32(data[j+6 : j+10])
+				if v > 0 {
+					ev.KillDamage = math.Float32frombits(v)
+					have.kd = true
+				}
+			}
+		case kHashKillRange:
+			if !have.kr && typeByte == 0x04 && j+10 <= len(data) {
+				v := binary.LittleEndian.Uint32(data[j+6 : j+10])
+				if v > 0 {
+					ev.KillRange = math.Float32frombits(v)
+					have.kr = true
+				}
+			}
+		case kHashHitZone:
+			if !have.hz && typeByte == 0x04 && j+10 <= len(data) {
+				ev.HitZone = binary.LittleEndian.Uint32(data[j+6 : j+10])
+				have.hz = true
+			}
+		case kHashVictimEnumA:
+			if !have.vea && typeByte == 0x04 && j+10 <= len(data) {
+				ev.VictimEnumA = binary.LittleEndian.Uint32(data[j+6 : j+10])
+				have.vea = true
+			}
+		case kHashVictimEnumB:
+			if !have.veb && typeByte == 0x04 && j+10 <= len(data) {
+				ev.VictimEnumB = binary.LittleEndian.Uint32(data[j+6 : j+10])
+				have.veb = true
+			}
+		case kHashVictimCounter:
+			if !have.vc && typeByte == 0x04 && j+10 <= len(data) {
+				ev.VictimCounter = binary.LittleEndian.Uint32(data[j+6 : j+10])
+				have.vc = true
+			}
+		case kHashVictimEnt64:
+			if !have.vid && typeByte == 0x08 && j+14 <= len(data) {
+				ev.VictimEnt64 = binary.LittleEndian.Uint64(data[j+6 : j+14])
+				have.vid = true
 			}
 		}
 	}
@@ -206,7 +284,7 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 			Headshot: headshot,
 			TimeSecs: t,
 		}
-		fillExtendedKillTLVs(data, i, dbnoWindowBytes, &ev)
+		fillExtendedKillTLVs(data, i, extraTLVWindowBytes, &ev)
 		events = append(events, ev)
 
 		// Emit separate DBNO event
@@ -222,7 +300,7 @@ func ExtractBinaryFeedback(data []byte, ticks []TimerTick, totalDuration float32
 					Headshot: headshot,
 					TimeSecs: t,
 				}
-				fillExtendedKillTLVs(data, i, dbnoWindowBytes, &dbnoEv)
+				fillExtendedKillTLVs(data, i, extraTLVWindowBytes, &dbnoEv)
 				events = append(events, dbnoEv)
 			}
 		}

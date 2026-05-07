@@ -47,6 +47,12 @@ Comprehensive Rainbow Six Siege `.rec` replay file analyzer. Extracts position t
   - `0x4EA45BC3` — corroborating headshot byte
 - **Decoded enums**: `KillEnum3 - 1 = AttackerTeam`, `KillEnum4 - 1 = VictimTeam` (verified across 7 kills)
 - **DBNO attribution** — `dbnoBy`, `finishedBy` fields on `matchFeedback` entries
+- **Sub-stream kill TLVs** (decoded from secondary kill-record copies, ±2048 byte window):
+  - `roundTimeMs` (`0x6C463718`) — ms since round start, matches `MatchFeedback.timeInSeconds` within 1 s
+  - `killDamage` (`0xC9527BDD`) — f32 damage of killing bullet / max-health (HS mean 0.63 vs 0.33 body, n=95)
+  - `killRange` (`0xFB9DBF08`) — f32 weapon-class range / falloff factor
+  - `hitZone` (`0xA5F688E7`) — body-part enum 0/1/2/3/4 for the killing shot
+  - `victimEnumA/B`, `victimCounter`, `victimEnt64` — entity-scoped TLVs (`0x23` marker) on the victim pawn
 
 ### Round-End Scoreboard
 - `header.scoreboard[]` — final tallies per player ID (score, assists, round-assists)

@@ -390,6 +390,26 @@ type BinaryMatchEvent struct {
 	VictimTeam     int    `json:"victimTeam,omitempty"`      // KillEnum4 - 1
 	WeaponID       uint64 `json:"weaponId,omitempty"`        // hash 0x65DD6CF8 — session-variable ID of killing weapon
 	HeadshotByte   uint8  `json:"headshotByte,omitempty"`    // hash 0x4EA45BC3 — corroborating HS flag
+
+	// Newly decoded TLVs found in the kill-record sub-stream duplicates by
+	// scanning every TLV hash near 525 unique kills across 79 R06 replays.
+	//
+	// Coverage is partial because these values live in the secondary
+	// duplicates of the kill record (see ExtractBinaryFeedback merging logic).
+	// When absent the field is left at the zero value.
+	RoundTimeMs uint32  `json:"roundTimeMs,omitempty"` // hash 0x6C463718 — ms since round start. Verified vs MatchFeedback: ts/1000 ≈ feedback time within ±1s.
+	KillDamage  float32 `json:"killDamage,omitempty"`  // hash 0xC9527BDD — f32 in [0,1]. Strong HS correlation (mean 0.63 HS vs 0.33 body) → damage of killing bullet normalized to victim max-health.
+	KillRange   float32 `json:"killRange,omitempty"`   // hash 0xFB9DBF08 — f32 in [0,1]. Weapon-dependent range (e.g. one shotgun-like weapon clusters near 0.05, a DMR clusters near 0.55). Likely shot range / damage-falloff factor.
+	HitZone     uint32  `json:"hitZone,omitempty"`     // hash 0xA5F688E7 — enum, 0/1/2/3/4. Body part hit on the killing shot. Value 4 dominates HS kills (48 vs 30 non-HS), 2 is more common on body kills. Higher values lean toward upper body / head; full mapping still being decoded.
+
+	// Per-entity property TLVs that travel together with the kill record.
+	// These are 0x23-prefixed (TLV scoped to an entity ref8) so they appear
+	// only when their entity is replicated near the kill — typically the
+	// victim's pawn properties at the moment of death.
+	VictimEnumA   uint32 `json:"victimEnumA,omitempty"`   // hash 0x31C825EC — small enum (1..5), shifts toward higher values on HS kills (val=3 appears 5× more often on HS).
+	VictimEnumB   uint32 `json:"victimEnumB,omitempty"`   // hash 0xB53D3EFA — small enum (1..4); semantics still being decoded.
+	VictimCounter uint32 `json:"victimCounter,omitempty"` // hash 0xA374F4B6 — u32 with 85 distinct values across 172 occurrences. Likely a tick or shot counter for the victim's pawn.
+	VictimEnt64   uint64 `json:"victimEnt64,omitempty"`   // hash 0x488A15F4 — u64 (~1.25e11). Stable per match → victim profile/session ID.
 }
 
 // LibraryCameraFrame is a camera look-direction sample from the dissect library.

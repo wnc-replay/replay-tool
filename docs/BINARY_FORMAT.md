@@ -210,6 +210,42 @@ Distributions verified across **402 kills** from **85 replays** spanning Y9S1, Y
 | `0x3187B853` | u32 | **VictimTeam + 1** |
 | `0x0B64ADA5` | u32 | Reserved — always `0` across all 402 kills |
 
+### Sub-stream Kill TLVs (decoded from duplicate copies)
+
+Each kill is replicated 1–4 times in the binary by different replay sub-streams.
+The hashes below live in the **secondary** copies (the first copy has only the
+"primary" TLVs above), so a wider scan window is needed: `extraTLVWindowBytes =
+2048` captures them while staying inside one round's worth of replication data.
+With that window, coverage on a 79-replay R06 corpus is 50–70 % depending on the
+hash. When absent the field is left at its zero value.
+
+| Hash | Type | Decoded Meaning |
+|------|------|-----------------|
+| `0x6C463718` | u32 | **Round timestamp in milliseconds** since round start. Verified by matching against `MatchFeedback.TimeInSeconds` — `roundTimeMs / 1000 ≈ feedback time` within ±1 s. Far more accurate than the offset-based `timeSecs` on replays where the offset interpolation drifts. |
+| `0xC9527BDD` | f32 | **Damage of the killing bullet** normalised to victim max-health (range `[0, 1]`). Strong headshot correlation: mean `0.63` for HS kills vs `0.33` for body kills (n = 95). HS one-shot kills cluster near `1.0`. |
+| `0xFB9DBF08` | f32 | **Range / damage-falloff factor** for the killing shot (range `[0, 1]`, weapon-dependent). Same weapon clusters tightly around its weapon-class value; a shotgun-class weapon stays near `0.05`, a DMR-class weapon near `0.55`. |
+| `0xA5F688E7` | u32 | **Hit-zone enum** for the killing shot (observed values `0/1/2/3/4`). Value `4` dominates HS kills (48 vs 30 non-HS), value `2` is more common on body kills. Higher values lean toward upper body / head; full mapping still being decoded. |
+| `0x31C825EC` | u32 | Victim-pawn enum (1..5, entity-scoped via `0x23` marker). Skews higher on HS kills (val=3 appears 5× more often on HS). |
+| `0xB53D3EFA` | u32 | Victim-pawn enum (1..4, entity-scoped). Semantics undecoded. |
+| `0xA374F4B6` | u32 | Victim-pawn counter — 85 distinct values across 172 occurrences, range `0..249`; likely a tick or shot counter. |
+| `0x488A15F4` | u64 | Victim-pawn entity ID (~`1.25e11`); stable per match → profile/session ID. |
+
+#### Constant sub-stream markers
+
+These hashes appear consistently near kill records but never carry a meaningful
+value — they are present/absent flags marking which sub-stream wrote the
+duplicate. They are documented for completeness; the tool does not surface them.
+
+| Hash | Type | Value |
+|------|------|-------|
+| `0xD961FC99` | u8 | always `1` (~68 % of kills) |
+| `0x10145FEA` | u8 | always `1` (~71 %) |
+| `0x27B31851` | u8 | always `1` (~68 %) |
+| `0x4766DA41` | u8 | always `1` (~9 %) |
+| `0x1850F906` | u8 | always `1` (~4 %) |
+| `0x80D18F8B` | u8 | always `1` (~4 %) |
+| `0x5016F6EB` | u64 | always `0` (~48 %) |
+
 ## Health Property
 
 **Hash**: `0x4171D3C3` (in post-80% region)
